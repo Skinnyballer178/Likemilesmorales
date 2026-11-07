@@ -125,24 +125,30 @@ export const SEAM = {
 export const SUIT = {
   enabled: true,
   tauMs: 120, resetGapMs: 600,            // smoothing of the measured body numbers (head, chest). Lower = livelier, higher = steadier
-  alpha: 0.9,                             // suit opacity on the body (1 = fully hides the real clothes; 0.9 keeps folds visible)
-  alphaRed: 0.97,                         // opacity of the red parts
+  alpha: 0.95,                            // suit opacity on the body (the live camera shading is multiplied in, so the real folds and light still show)
+  alphaRed: 0.97,
+  shadeK: 1.1, grain: 0.035, lumW: 160, lumH: 90, // live-video shading: strength, film grain, size of the small luminance picture the shader reads (about 1/8 of the camera picture)                         // opacity of the red parts
   personMin: 0.02,                        // a row counts as "person" when this share of its width is person (ignores specks)
   torso: { minRowFrac: 0.4, rows: 3, startFrac: 0.10, fallbackFrac: 0.30 },  // torso top = first run of rows with >= 40% of the widest clothes row, no sooner than 10% down the person
   head: { heightFrac: 0.8, rxScale: 0.7, ryScale: 1.2, maxRxToSpan: 0.48 },  // maxRxToSpan: head half-width never exceeds this x (person top -> torso top), so an arm touching the head cannot blow the hood up. Head ellipse: heightFrac = share of (person top -> torso top) that is head, rxScale = width factor on the median head width
   chestDrop: 0.2,                         // chest centre = torso top + this share of the body height below it
-  web: { spokes: 14, line: 0.005, rings: 6, sag: 0.12 },                     // web geometry in chest-width units
-  emblemR: 0.14,                          // emblem ring radius, in chest-width units
+  web: { spokes: 18, line: 0.0032, rings: 9, sag: 0.12 },   // fine, like the Grok suit: thin web lines, not a fat red net                     // web geometry in chest-width units
+  emblemR: 0.2,                          // emblem ring radius, in chest-width units
   band: { along: 0.45, half: 0.22, across: 0.62 },                           // wrist band: distance from the wrist, half length, half width (all x hand size, wrist to middle knuckle)
   hand: { centre: 1.1, radius: 1.35 },                                       // hand region that is always suited, even above the neck line
-  red: [0.88, 0.07, 0.12], base: [0.025, 0.025, 0.04],
+  red: [0.50, 0.10, 0.11], emblemRed: [0.78, 0.10, 0.12], base: [0.065, 0.065, 0.075],   // sampled from the Grok suit image: near-black fabric, dim red web, stronger red emblem and bands
   // Session 7: Jacket look = blue quilted puffer over the clothes/arms, red hood up, red inner hoodie at the neck. The suit stays only on the hands (in front of the sleeves).
   jacket: {
-    bulk: 0.07,                 // puffer bulk: the silhouette grows this far past the body, in chest-width units
-    baffle: 0.16,               // quilting row spacing, chest-width units (rows run across the torso, and across each sleeve along the arm)
+    bulk: 0.06,                 // puffer bulk: the silhouette grows this far past the body, in chest-width units
+    baffle: 0.3,                // (Grok jacket: about 4 wide baffles down the body)
+    open: 0.2,                  // front is unzipped: jacket edges sit this far either side of the centre; suit + emblem inside, red hoodie strips next to it
+    // quilting row spacing, chest-width units (rows run across the torso, and across each sleeve along the arm)
     alpha: 0.97,                // jacket opacity (nearly hides the real clothes; the puffer is thick)
     shoulderX: 0.42, shoulderDrop: 0.08, // sleeve start: sideways from the chest centre and down from the torso top, chest-width units
-    blue: [0.09, 0.20, 0.55], blueDark: [0.03, 0.07, 0.22],
-    hoodRed: [0.78, 0.06, 0.10], hoodie: [0.55, 0.04, 0.08],
+    blue: [0.12, 0.33, 0.45], blueDark: [0.04, 0.13, 0.20],
+    hoodRed: [0.52, 0.14, 0.14], hoodie: [0.40, 0.07, 0.08],
   },
 };
+
+// ---- Outfit reveal (S7 fix): nothing is worn until the hand frame has locked and the window is open; then the outfit glitches in, slice by slice, like the reference video ----
+export const OUTFIT = { revealMs: 900, slices: 36, neon: [0.25, 0.9, 1.0] };

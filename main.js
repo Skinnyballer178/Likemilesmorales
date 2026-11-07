@@ -12,7 +12,7 @@ import { buildSeam } from './faceseam.js';
 import { drawFaceOverlay } from './faceoverlay.js';
 import { maskFresh } from './segmask.js';
 import { createSuitFx } from './suitgl.js';
-import { SUIT } from './config.js';
+import { SUIT, OUTFIT } from './config.js';
 
 const $ = id => document.getElementById(id);
 const dbg = createDebug();
@@ -24,6 +24,10 @@ const qs = new URLSearchParams(location.search);
 const suitOff = qs.get('suit') === 'off' || !SUIT.enabled;
 const suit = createSuitFx({ canvas: $('suit') });
 const suitWanted = () => !suitOff && (look === 'suit' || look === 'jacket') && suit.ok;   // the body layer draws both looks (S7)
+// Nothing is worn until the hand frame has locked and the window is open (like the reference video); then the outfit glitches in. Reset button / mirror toggle / camera restart take it off again.
+let outfitStart = null;
+const outfitWanted = () => suitWanted() && outfitStart !== null;
+function takeOff() { outfitStart = null; suit.setReveal(0); suit.setMask(null); }
 const fx = createWindowFx({ canvas: $('fx'), mode: qs.get('fx') || 'normal', reducedFlash: qs.has('calm') ? true : undefined });
 
 const MESSAGES = {
@@ -55,7 +59,7 @@ async function loadSeg() { if (segOff || segLoading) return; segLoading = true; 
 function runSeg(canvas, hands) {
   const windowWanted = snap.state !== 'idle' || fx.stats.phase !== 'closed';   // arming counts, so the mask is ready by the time the frame locks
   const now = performance.now();
-  if (windowWanted || suitWanted()) {
+  if (windowWanted || outfitWanted()) {
     segIdleSince = null;
     const m = seg.process(canvas, now, hands);                                  // call BEFORE the debug overlay is drawn on the canvas
     if (m) { fx.setMask(m); suit.setMask(m); segActive = true; lastMask = m; lastMaskT = now; }
@@ -129,7 +133,7 @@ const cam = createCamera({
     $('start').hidden = s === 'running' || s === 'requesting';
     dbg.set('state', s); dbg.set('video', detail);
     if (s === 'running') { const st = $('stage'); st.style.aspectRatio = `${st.width} / ${st.height}`; fx.resize(st.width, st.height); fx.start(); suit.resize(st.width, st.height); suit.setLook(look); suit.setActive(suitWanted()); suit.start(); }
-    else { fx.stop(); suit.stop(); }
+    else { fx.stop(); suit.stop(); outfitStart = null; }
     if (s === 'running') { tracker.reset(); gesture.reset(); lastVT = -1; lastFaceVT = -1; faceTrack.reset(); if (!detector && !loading) loadDetector(); else if (detector) setHint('idle'); }
   },
   onFrame(canvas, ms, video) {
@@ -138,10 +142,13 @@ const cam = createCamera({
     fx.setTarget(snap);
     suit.setHands(hands);
     camFrames++;
+    if (outfitStart === null && suitWanted() && fx.stats.phase === 'open') outfitStart = performance.now();
+    suit.setReveal(outfitStart === null ? 0 : (performance.now() - outfitStart) / OUTFIT.revealMs);
+    suit.setFrame(canvas);
     runSeg(canvas, hands);
     runFace(video, canvas);
     if (dbg.on) { const g = canvas.getContext('2d'); drawOverlay(g, canvas.width, canvas.height, hands, snap); if (faceOn) drawFaceOverlay(g, canvas.width, canvas.height, face, seam); }
-    if (dbg.on) dbg.set('suit', `${suit.ok ? (suitWanted() ? 'on' : 'off') : 'WebGL unavailable'} · ${suit.stats.fps} fps · ${suit.stats.ms.toFixed(2)} ms/draw · ${suit.stats.body}`);
+    if (dbg.on) dbg.set('suit', `${suit.ok ? (outfitWanted() ? 'worn' : suitWanted() ? 'waiting for the frame' : 'off') : 'WebGL unavailable'} · ${suit.stats.fps} fps · ${suit.stats.ms.toFixed(2)} ms/draw · ${suit.stats.body}`);
     dbg.set('draw+detect ms', (ms + performance.now() - t0).toFixed(1));
     dbg.set('window', fx.stats.ok ? `${fx.stats.phase} · ${fx.stats.fps} fps · ${fx.stats.ms.toFixed(2)} ms/draw${fx.reducedFlash ? ' · calm' : ''}` : 'WebGL unavailable'); dbg.tick();
   },
@@ -169,9 +176,11 @@ async function boot() {
   } finally { booting = false; }
 }
 $('start').addEventListener('click', boot);
-$('mirror').addEventListener('change', e => { mirror = e.target.checked; cam.setMirror(mirror); tracker.reset(); gesture.reset(); fx.setTarget(null); seg.pause(); fx.setMask(null); suit.setMask(null); segActive = false; lastMask = null; faceTrack.reset(); faceDet.pause(); seam = null; });
+$('mirror').addEventListener('change', e => { mirror = e.target.checked; cam.setMirror(mirror); tracker.reset(); gesture.reset(); fx.setTarget(null); seg.pause(); fx.setMask(null); takeOff(); segActive = false; lastMask = null; faceTrack.reset(); faceDet.pause(); seam = null; });
 document.querySelectorAll('[name=look]').forEach(r =>
-  r.addEventListener('change', e => { look = e.target.value; dbg.set('look', look); suit.setLook(look); suit.setActive(suitWanted()); if (!suitWanted()) suit.setMask(null); }));
+  r.addEventListener('change', e => { look = e.target.value; dbg.set('look', look); suit.setLook(look); suit.setActive(suitWanted()); if (!suitWanted()) takeOff(); }));
+$('reset').addEventListener('click', takeOff);
+addEventListener('keydown', e => { if (e.key === 'Escape') takeOff(); });
 dbg.set('look', look);
 
 // FPS counter (top right of the picture): camera = pictures processed per second, screen = how often the browser redraws the page (drops when the page is lagging). ?fps=off hides it, the checkbox toggles it.
