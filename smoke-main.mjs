@@ -24,7 +24,7 @@ register('./smoke-loader.mjs', import.meta.url);
 // ---- fake DOM ----
 const ctx2d = () => new Proxy({}, { get: (t, k) => (k in t ? t[k] : k === 'createImageData' ? (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }) : k === 'measureText' ? () => ({ width: 10 }) : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
 const listeners = {};
-const mkEl = id => { const el = { id, width: 1280, height: 720, style: {}, dataset: {}, textContent: '', hidden: false, videoWidth: 1280, videoHeight: 720, readyState: 4, currentTime: 0, getContext: () => (id === 'fx' ? null : ctx2d()), addEventListener(t, fn) { (listeners[id + ':' + t] ||= []).push(fn); }, play: async () => {}, getVideoTracks: () => [], checked: true, value: 'suit' }; return el; };
+const mkEl = id => { const el = { id, width: 1280, height: 720, style: {}, dataset: {}, textContent: '', hidden: false, videoWidth: 1280, videoHeight: 720, readyState: 4, currentTime: 0, getContext: () => (id === 'fx' || id === 'suit' ? null : ctx2d()), addEventListener(t, fn) { (listeners[id + ':' + t] ||= []).push(fn); }, play: async () => {}, getVideoTracks: () => [], checked: true, value: 'suit' }; return el; };
 const els = {};
 globalThis.document = { hidden: false, body: { dataset: {} }, getElementById: id => (els[id] ||= mkEl(id)), querySelectorAll: () => [], createElement: () => mkEl('tmp'), addEventListener() {} };
 globalThis.location = { search };

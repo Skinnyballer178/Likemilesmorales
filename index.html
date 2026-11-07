@@ -11,8 +11,8 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:16px/1
 main{min-height:100%;display:grid;grid-template-rows:auto 1fr auto;gap:12px;padding:16px;max-width:1100px;margin:auto}
 h1{margin:0;font-size:1.5rem;letter-spacing:.01em}
 .stage-wrap{position:relative;display:grid;place-items:center;background:#000;border-radius:12px;overflow:hidden;min-height:50vh}
-#stage,#fx{grid-area:1/1;width:100%;height:auto;max-height:75vh;object-fit:contain}
-#fx{pointer-events:none} /* WebGL window layer, same box as #stage */
+#stage,#suit,#fx{grid-area:1/1;width:100%;height:auto;max-height:75vh;object-fit:contain}
+#suit,#fx{pointer-events:none} /* WebGL window layer, same box as #stage */
 #cam{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none} /* never display:none */
 .overlay{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;gap:12px;align-content:center}
 body[data-state=running] .overlay{display:none}
@@ -26,6 +26,7 @@ button,.pick label{font:inherit;cursor:pointer}
 .pick input:checked+span{border-color:var(--red);background:#2a1014}
 #hint{margin:0;min-height:1.5em;color:var(--neon)}
 #status{color:var(--muted);margin:0;max-width:46ch}
+#fps{position:absolute;top:8px;right:8px;margin:0;padding:3px 8px;background:#000a;color:var(--neon);font:12px/1.4 ui-monospace,monospace;border-radius:6px;pointer-events:none}
 #debug{position:fixed;top:8px;left:8px;margin:0;padding:8px;background:#000c;color:var(--neon);font:12px/1.4 ui-monospace,monospace;border-radius:6px}
 small{color:var(--muted)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -36,7 +37,9 @@ small{color:var(--muted)}
   <h1>Suit up</h1>
   <div class="stage-wrap">
     <canvas id="stage" width="1280" height="720" aria-label="Camera view"></canvas>
+    <canvas id="suit" width="960" height="540" aria-hidden="true"></canvas>
     <canvas id="fx" width="960" height="540" aria-hidden="true"></canvas>
+    <p id="fps" aria-hidden="true"></p>
     <video id="cam" playsinline muted></video>
     <div class="overlay">
       <p id="status">Allow the camera to begin. Nothing is uploaded; everything runs on your device.</p>
@@ -50,7 +53,7 @@ small{color:var(--muted)}
       <label><input type="radio" name="look" value="suit" checked><span>Suit</span></label>
       <label><input type="radio" name="look" value="jacket"><span>Jacket</span></label>
     </fieldset>
-    <label><input type="checkbox" id="mirror" checked> Mirror view</label>
+    <span><label><input type="checkbox" id="mirror" checked> Mirror view</label> <label><input type="checkbox" id="showfps" checked> Show FPS</label></span>
   </div>
   <small>Unofficial fan project, not affiliated with Marvel or Sony. Original art only. No video leaves your device.</small>
 </main>
