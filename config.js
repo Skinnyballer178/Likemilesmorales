@@ -81,3 +81,38 @@ export const NEON = {
   misreg: 0.004,                     // print misregistration offset of the second dot layer
   rim: { strength: 0.9, color: [0.10, 0.90, 0.77], warm: [1.0, 0.25, 0.55] }, // light spill on the person's edge, inside the window only
 };
+
+// ---- Session 5: face tracking + hair/neck seam ----
+// FaceLandmarker (478 points, 1 face) runs on the camera video (like the hand model); points are turned into DISPLAY
+// coordinates (x flipped when mirrored) and smoothed. S8 (mask gesture) and S9 (mask render) read the result.
+// The face model costs real time, so it only runs when asked for: ?face=on (S8/S9 will flip FACE.enabled to true). ?face=off always disables.
+export const FACE = {
+  enabled: false,
+  options: { numFaces: 1, minFaceDetectionConfidence: 0.5, minFacePresenceConfidence: 0.5, minTrackingConfidence: 0.5, outputFaceBlendshapes: false, outputFacialTransformationMatrixes: true },
+  filter: { minCutoff: 1.5, beta: 12, dCutoff: 1.0 }, // One Euro on every landmark x/y (display units). Raise minCutoff = steadier but laggier
+  minHeight: 0.07, maxHeight: 1.6,   // plausible face height (landmark 10 to chin) in picture-height units; outside = ignored as a false detection
+  jumpDist: 0.25,                    // the face centre moving farther than this in one detection (picture heights) restarts the smoothing (no smearing)
+  holdMs: 250,                       // detection dropout tolerated: last pose is held at full confidence
+  fadeMs: 400,                       // after the hold, confidence falls to 0 over this long (the mask fades, it never snaps)
+  resetGapMs: 600,                   // a gap longer than this restarts the smoothing from the new detection
+  headTopAllow: 0.45,                // head top (hair included) sits this far above landmark 10, as a fraction of the face height (chin to landmark 10)
+  noseDepth: 1.1,                    // nose-tip depth in front of the cheek points / half face width (about 1 for real faces: tune from the debug yaw lines). Only used for the landmark yaw estimate: tan(yaw) = offset / noseDepth
+  pose: { window: 90, minAngle: 12, agreeMin: 0.6, minSamples: 30, rollTolDeg: 20 }, // cross-check of the transformation matrix against the landmarks
+  governor: { budgetMs: 14, maxEvery: 3, minSamples: 8 },   // run the model every Nth camera frame; N rises when inference is slow
+  maxErrors: 3,                                              // consecutive model errors before falling back to CPU / giving up
+  idleOffMs: 3000,                                           // nobody asked for the face for this long: the detector pauses
+};
+
+// Hair/neck seam: the soft edge of the face region (the part the S9 mask covers) where it meets hair, ears and neck.
+// All widths are fractions of the face height. `bias` = how much of the fade lies OUTSIDE the face oval (0 = fade fully inside).
+export const SEAM = {
+  grid: { w: 192, h: 108 },                  // alpha map resolution (picture is stretched over it); cheap to upload as a texture in S9
+  feather: [                                  // [t, width, bias]: t = height on the face (0 chin, 1 landmark 10); values are blended smoothly between rows
+    [1.00, 0.050, 0.15],                      // hairline: tight, so the mask meets the hair crisply
+    [0.55, 0.070, 0.20],                      // temples, ears, cheeks
+    [0.15, 0.100, 0.35],                      // jaw line
+    [0.00, 0.180, 0.55],                      // chin and neck: long soft fade into the neck / collar
+  ],
+  hair: { keep: 0.9, from: 0.55, to: 0.85 },  // hair in front of the forehead: removes up to `keep` of the mask between face heights `from`..`to` (0 below `from`)
+  person: [0.30, 0.70],                       // the mask never leaves the person silhouette: soft threshold on the person value (same as SEG.edge)
+};

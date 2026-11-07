@@ -75,4 +75,15 @@ Rules (enforced by tests from S8 on, `independence.test.mjs`):
   The model sees a 384x216 copy of the already-mirrored display canvas, so masks are in display orientation (mirror toggle needs nothing). Mask = packed RGBA (R person; G hair, B skin, A clothes when SEG.layers asks for them: S6/S11).
   Self-test: labels (6, label 0 = background) + flat grey picture must be background + live check that detected palms lie inside the person mask. URL flags: ?seg=off, ?segdelegate=cpu|gpu, ?segtest=off, ?fx=grid, ?fx=circle, ?debug=1 (seg line).
   NOT yet verified: the real model (no access to its host from the build sandbox). Thresholds in SEG.selfTest and SEG.edge are first guesses to tune from the S4 live check. Tests: `npm test` (63 tests, 15 GPU ones skip without headless GL), `npm run test:gl`.
-- Next: S5 face (FaceLandmarker mask-ready mesh, hair/neck seam).
+- S5 done: face tracking + hair/neck seam. Runs only with `?face=on` (FACE.enabled in config.js is false until S8/S9 consume it; `?face=off` always disables).
+  facelm.js (pure): landmark ids + FACE_OVAL, result normalising, HEAD FRAME (origin chin, up = chin -> landmark 10; head coordinates s sideways / t height: 0 chin, 1 landmark 10,
+  headTop = 1 + FACE.headTopAllow) with toHead/fromHead (S8 uses this: head-relative fist path), pose (landmark yaw; matrix yaw/pitch/roll with a run-time agreement check:
+  ok / flipped (yaw negated) / suspect (matrix ignored) / unknown), createFaceTracker (One Euro on all 478 points, display coordinates, mirror-aware, hold 250 ms then fade 400 ms,
+  false-detection and jump rejection). facetracker.js (glue): FaceLandmarker VIDEO mode, GPU -> CPU fallback, iOS = CPU, cadence governor, error handling.
+  faceseam.js (pure): buildSeam({ face, mask, aspect, out }) -> 192x108 alpha map = face oval with per-height feather (tight hairline, soft jaw/neck), x hair in front of the forehead
+  (needs the S4 hair layer: switched on automatically with ?face=on), x person silhouette (bilinear), x face confidence. S9 uploads it as a texture and multiplies the mask by it.
+  faceoverlay.js: debug view (?face=on&debug=1): outline, head axis and head top, pose text, red seam tint. Debug lines: face, face pose, seam, face model.
+  Tests: `npm test` (face geometry/tracker, seam, glue with a fake model, overlay), `npm run test:smoke` (main.js end to end with fake DOM, camera and MediaPipe), `npm run preview:s5` (PNG previews).
+  NOT yet verified: the real FaceLandmarker (no access to its host from the build sandbox). To check in the S5 live test: matrix check verdict (turn the head > 12 degrees), landmark yaw vs matrix yaw,
+  FACE.noseDepth (1.1 is a first guess), hair cut on a real fringe, seam softness at the neck, face ms on your machine.
+- Next: S6 body (Suit look).

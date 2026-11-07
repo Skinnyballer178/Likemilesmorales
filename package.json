@@ -6,7 +6,9 @@
     "test": "node --test",
     "test:gl": "xvfb-run -a node --test windowgl.test.mjs",
     "preview": "xvfb-run -a node render-preview.mjs preview",
-    "preview:s4": "xvfb-run -a node prev_s4.mjs preview-s4"
+    "preview:s4": "xvfb-run -a node prev_s4.mjs preview-s4",
+    "test:smoke": "node smoke-main.mjs '?face=on&debug=1' && node smoke-main.mjs '?debug=1' && node smoke-main.mjs '?face=on'",
+    "preview:s5": "node prev_s5.mjs preview-s5"
   },
   "optionalDependencies": {
     "gl": "^8.1.6"

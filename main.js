@@ -1,11 +1,16 @@
 import { createCamera } from './camera.js';
 import { createDebug } from './debug.js';
-import { LOOKS, SEG } from './config.js';
+import { LOOKS, SEG, FACE } from './config.js';
 import { loadHandLandmarker, createHandTracker, toRecorded } from './hands.js';
 import { createFrameGesture } from './gesture.js';
 import { drawOverlay } from './overlay.js';
 import { createWindowFx } from './windowgl.js';
 import { createSegmenter } from './segmenter.js';
+import { createFaceTracker } from './facelm.js';
+import { createFaceDetector } from './facetracker.js';
+import { buildSeam } from './faceseam.js';
+import { drawFaceOverlay } from './faceoverlay.js';
+import { maskFresh } from './segmask.js';
 
 const $ = id => document.getElementById(id);
 const dbg = createDebug();
@@ -35,7 +40,10 @@ const setHint = key => { const el = $('hint'); if (el.dataset.k !== key) { el.da
 
 // ---- person segmentation (S4): runs only while the window is (about to be) open. ?seg=off disables it, ?segdelegate=cpu|gpu forces a delegate, ?segtest=off skips the self-test.
 const segOff = qs.get('seg') === 'off';
-const seg = createSegmenter({ onStatus: (s, n) => dbg.set('seg', `${s}${n ? ' · ' + n : ''}`) });
+// ---- face (S5): runs only with ?face=on (S8/S9 switch FACE.enabled on). ?face=off always disables. The hair channel is read from the segmenter only when the face seam needs it.
+const faceOn = qs.get('face') === 'off' ? false : qs.get('face') === 'on' || FACE.enabled;
+const seg = createSegmenter({ onStatus: (s, n) => dbg.set('seg', `${s}${n ? ' · ' + n : ''}`), config: faceOn ? { ...SEG, layers: [...new Set([...SEG.layers, 'hair'])] } : SEG });
+let lastMask = null, lastMaskT = 0;
 let segLoading = false, segActive = false, segIdleSince = null;
 async function loadSeg() { if (segOff || segLoading) return; segLoading = true; await seg.load(); }
 function runSeg(canvas, hands) {
@@ -44,12 +52,31 @@ function runSeg(canvas, hands) {
   if (windowWanted) {
     segIdleSince = null;
     const m = seg.process(canvas, now, hands);                                  // call BEFORE the debug overlay is drawn on the canvas
-    if (m) { fx.setMask(m); segActive = true; }
+    if (m) { fx.setMask(m); segActive = true; lastMask = m; lastMaskT = now; }
   } else if (segActive) {
     if (segIdleSince === null) segIdleSince = now;
-    else if (now - segIdleSince > SEG.idleOffMs) { seg.pause(); fx.setMask(null); segActive = false; segIdleSince = null; }
+    else if (now - segIdleSince > SEG.idleOffMs) { seg.pause(); fx.setMask(null); segActive = false; segIdleSince = null; lastMask = null; }
   }
   if (dbg.on) dbg.set('seg stats', `${seg.delegate} · every ${seg.every} · ${seg.avgMs.toFixed(1)} ms · hands agree ${seg.agreement === null ? '-' : Math.round(seg.agreement * 100) + '%'} (${seg.agreementSamples}) ${seg.verdict}`);
+}
+
+// ---- face tracking + hair/neck seam (S5) ----
+const faceDet = createFaceDetector({ onStatus: (s, n) => dbg.set('face model', `${s}${n ? ' · ' + n : ''}`) });
+const faceTrack = createFaceTracker();
+let face = { present: false, conf: 0 }, seam = null, faceLoading = false, lastFaceVT = -1;
+async function loadFace() { if (!faceOn || faceLoading) return; faceLoading = true; await faceDet.load(); }
+function runFace(video, canvas) {
+  if (!faceOn) return;
+  const now = performance.now(), aspect = canvas.width / canvas.height;
+  let raw;                                                  // undefined = no new detection this frame (model not ready, cadence skip, same video frame)
+  if (faceDet.status === 'ready' && video.currentTime !== lastFaceVT) { lastFaceVT = video.currentTime; raw = faceDet.detect(video); }
+  face = faceTrack.update(raw, now, { mirror, aspect });
+  if (dbg.on) {                                             // nothing but the debug view uses the seam yet (S9 will), so it is only built here
+    seam = buildSeam({ face, mask: lastMask && maskFresh(now, lastMaskT) ? lastMask : null, aspect, out: seam, hairLayer: true });
+    dbg.set('face', `${face.present ? 'tracking' : 'no face'} · conf ${face.conf.toFixed(2)} · ${faceDet.delegate} · every ${faceDet.every} · ${faceDet.avgMs.toFixed(1)} ms`);
+    if (face.present) dbg.set('face pose', `yaw ${face.yaw.toFixed(0)} (landmarks ${face.yawLandmarks.toFixed(0)}) pitch ${face.pitch.toFixed(0)} roll ${face.roll.toFixed(0)} · ${face.poseSource} · matrix check ${face.poseVerdict}`);
+    dbg.set('seam', `coverage ${(seam.stats.coverage * 100).toFixed(1)}% · hair cut ${(seam.stats.hairCut * 100).toFixed(2)}% · person clip ${(seam.stats.personClip * 100).toFixed(2)}% · mask ${seam.stats.maskUsed ? 'yes' : 'no'} · hair ${seam.stats.hairUsed ? 'yes' : 'no'}`);
+  }
 }
 
 // ---- hands + gesture ----
@@ -63,7 +90,7 @@ async function loadDetector(delegate) {
   loading = true; setHint('loading');
   try {
     detector = await loadHandLandmarker({ delegate });
-    dbg.set('hands', `${detector.delegate} delegate`); errors = 0; setHint(gesture.state); loadSeg();   // the segmentation model loads after the hand model
+    dbg.set('hands', `${detector.delegate} delegate`); errors = 0; setHint(gesture.state); loadSeg(); loadFace();   // the segmentation and face models load after the hand model
   } catch (e) { console.error(e); detector = null; setHint('failed'); dbg.set('hands', 'load failed'); }
   loading = false;
 }
@@ -95,21 +122,22 @@ const cam = createCamera({
     dbg.set('state', s); dbg.set('video', detail);
     if (s === 'running') { const st = $('stage'); st.style.aspectRatio = `${st.width} / ${st.height}`; fx.resize(st.width, st.height); fx.start(); }
     else fx.stop();
-    if (s === 'running') { tracker.reset(); gesture.reset(); lastVT = -1; if (!detector && !loading) loadDetector(); else if (detector) setHint('idle'); }
+    if (s === 'running') { tracker.reset(); gesture.reset(); lastVT = -1; lastFaceVT = -1; faceTrack.reset(); if (!detector && !loading) loadDetector(); else if (detector) setHint('idle'); }
   },
   onFrame(canvas, ms, video) {
     const t0 = performance.now();
     detect(video, canvas);
     fx.setTarget(snap);
     runSeg(canvas, hands);
-    if (dbg.on) drawOverlay(canvas.getContext('2d'), canvas.width, canvas.height, hands, snap);
+    runFace(video, canvas);
+    if (dbg.on) { const g = canvas.getContext('2d'); drawOverlay(g, canvas.width, canvas.height, hands, snap); if (faceOn) drawFaceOverlay(g, canvas.width, canvas.height, face, seam); }
     dbg.set('draw+detect ms', (ms + performance.now() - t0).toFixed(1));
     dbg.set('window', fx.stats.ok ? `${fx.stats.phase} · ${fx.stats.fps} fps · ${fx.stats.ms.toFixed(2)} ms/draw${fx.reducedFlash ? ' · calm' : ''}` : 'WebGL unavailable'); dbg.tick();
   },
 });
 
 $('start').addEventListener('click', () => cam.start());
-$('mirror').addEventListener('change', e => { mirror = e.target.checked; cam.setMirror(mirror); tracker.reset(); gesture.reset(); fx.setTarget(null); seg.pause(); fx.setMask(null); segActive = false; });
+$('mirror').addEventListener('change', e => { mirror = e.target.checked; cam.setMirror(mirror); tracker.reset(); gesture.reset(); fx.setTarget(null); seg.pause(); fx.setMask(null); segActive = false; lastMask = null; faceTrack.reset(); faceDet.pause(); seam = null; });
 document.querySelectorAll('[name=look]').forEach(r =>
   r.addEventListener('change', e => { look = e.target.value; dbg.set('look', look); }));
 dbg.set('look', look);
