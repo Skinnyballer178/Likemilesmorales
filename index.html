@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suit Up (unofficial fan project)</title>
+<style>
+:root{--bg:#0d0d10;--ink:#f2f2f2;--red:#e11d2e;--neon:#19e3c4;--muted:#9a9aa5}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{min-height:100%;display:grid;grid-template-rows:auto 1fr auto;gap:12px;padding:16px;max-width:1100px;margin:auto}
+h1{margin:0;font-size:1.5rem;letter-spacing:.01em}
+.stage-wrap{position:relative;display:grid;place-items:center;background:#000;border-radius:12px;overflow:hidden;min-height:50vh}
+#stage{width:100%;height:auto;max-height:75vh;object-fit:contain}
+#cam{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none} /* never display:none */
+.overlay{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;gap:12px;align-content:center}
+body[data-state=running] .overlay{display:none}
+button,.pick label{font:inherit;cursor:pointer}
+#start{background:var(--red);color:#fff;border:0;border-radius:8px;padding:12px 22px;font-weight:700}
+#start:focus-visible,input:focus-visible+span{outline:3px solid var(--neon);outline-offset:2px}
+.controls{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between}
+.pick{display:flex;gap:8px}
+.pick input{position:absolute;opacity:0}
+.pick span{display:inline-block;padding:8px 16px;border:2px solid var(--muted);border-radius:8px}
+.pick input:checked+span{border-color:var(--red);background:#2a1014}
+#status{color:var(--muted);margin:0;max-width:46ch}
+#debug{position:fixed;top:8px;left:8px;margin:0;padding:8px;background:#000c;color:var(--neon);font:12px/1.4 ui-monospace,monospace;border-radius:6px}
+small{color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body data-state="idle">
+<main>
+  <h1>Suit up</h1>
+  <div class="stage-wrap">
+    <canvas id="stage" width="1280" height="720" aria-label="Camera view"></canvas>
+    <video id="cam" playsinline muted></video>
+    <div class="overlay">
+      <p id="status">Allow the camera to begin. Nothing is uploaded; everything runs on your device.</p>
+      <button id="start" type="button">Start camera</button>
+    </div>
+  </div>
+  <div class="controls">
+    <fieldset class="pick" style="border:0;padding:0;margin:0">
+      <legend class="sr" style="position:absolute;opacity:0">Look</legend>
+      <label><input type="radio" name="look" value="suit" checked><span>Suit</span></label>
+      <label><input type="radio" name="look" value="jacket"><span>Jacket</span></label>
+    </fieldset>
+    <label><input type="checkbox" id="mirror" checked> Mirror view</label>
+  </div>
+  <small>Unofficial fan project, not affiliated with Marvel or Sony. Original art only. No video leaves your device.</small>
+</main>
+<pre id="debug" hidden></pre>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
