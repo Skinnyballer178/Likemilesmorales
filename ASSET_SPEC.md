@@ -20,6 +20,9 @@ All textures are flat and unlit: no baked studio shadows, no highlights. Lightin
 8. Inner red hoodie, flat, 1024px.
 9. Neon background plate in Miles colours (red, teal, purple), 1920x1080, can be generated in code if you prefer.
 The current images (front + two profiles, no back view) are fine, the camera only sees your front.
+10. Mask UV texture (new, for the Mask system S9): the black-and-red mask painted on the MediaPipe canonical face-mesh UV layout, 1024x1024, flat and unlit, with the eye lens shapes on a separate transparent layer.
+    I will generate a UV template image (face-mesh wireframe) in S9 that you or Grok can paint over; the front close-up (item 1) is used for the front of the face, the sides can be plain black with red seams.
+    Original design inspired by the character, not a copy of official art. Mask must leave the hood/coat edge area free (the coat is drawn over it).
 
 ## Budget
 - Total assets under 3 MB (webp, quality ~80). Mask close-up under 400 KB, tiles under 150 KB each.

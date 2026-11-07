@@ -1,8 +1,8 @@
 // Replay a landmark recording (made with ?debug=1 and the R key) or any frame list through tracker + gesture.
-// Usage: node tools/replay.mjs recording.json   (prints a state timeline)
+// Usage: node replay.mjs recording.json   (prints a state timeline)
 import { readFileSync } from 'node:fs';
-import { createHandTracker, fromRecorded } from '../src/hands.js';
-import { createFrameGesture } from '../src/gesture.js';
+import { createHandTracker, fromRecorded } from './hands.js';
+import { createFrameGesture } from './gesture.js';
 
 export function replay(frames, { mirror = true, aspect = 16 / 9, onFrame } = {}) {
   const events = [], tracker = createHandTracker();

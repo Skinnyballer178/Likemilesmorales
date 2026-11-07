@@ -4,10 +4,15 @@ import { LOOKS } from './config.js';
 import { loadHandLandmarker, createHandTracker, toRecorded } from './hands.js';
 import { createFrameGesture } from './gesture.js';
 import { drawOverlay } from './overlay.js';
+import { createWindowFx } from './windowgl.js';
 
 const $ = id => document.getElementById(id);
 const dbg = createDebug();
 let look = LOOKS[0], mirror = true;
+
+// Window layer (WebGL on #fx, own render loop). ?fx=mask or ?fx=uv shows the geometry test modes; ?calm=1 forces reduced-flash.
+const qs = new URLSearchParams(location.search);
+const fx = createWindowFx({ canvas: $('fx'), mode: qs.get('fx') || 'normal', reducedFlash: qs.has('calm') ? true : undefined });
 
 const MESSAGES = {
   idle: 'Allow the camera to begin. Nothing is uploaded; everything runs on your device.',
@@ -68,18 +73,22 @@ const cam = createCamera({
     $('status').textContent = (MESSAGES[s] || '') + (detail && s !== 'running' ? ` ${detail}` : '');
     $('start').hidden = s === 'running' || s === 'requesting';
     dbg.set('state', s); dbg.set('video', detail);
+    if (s === 'running') { const st = $('stage'); st.style.aspectRatio = `${st.width} / ${st.height}`; fx.resize(st.width, st.height); fx.start(); }
+    else fx.stop();
     if (s === 'running') { tracker.reset(); gesture.reset(); lastVT = -1; if (!detector && !loading) loadDetector(); else if (detector) setHint('idle'); }
   },
   onFrame(canvas, ms, video) {
     const t0 = performance.now();
     detect(video, canvas);
+    fx.setTarget(snap);
     if (dbg.on) drawOverlay(canvas.getContext('2d'), canvas.width, canvas.height, hands, snap);
-    dbg.set('draw+detect ms', (ms + performance.now() - t0).toFixed(1)); dbg.tick();
+    dbg.set('draw+detect ms', (ms + performance.now() - t0).toFixed(1));
+    dbg.set('window', fx.stats.ok ? `${fx.stats.phase} · ${fx.stats.fps} fps · ${fx.stats.ms.toFixed(2)} ms/draw${fx.reducedFlash ? ' · calm' : ''}` : 'WebGL unavailable'); dbg.tick();
   },
 });
 
 $('start').addEventListener('click', () => cam.start());
-$('mirror').addEventListener('change', e => { mirror = e.target.checked; cam.setMirror(mirror); tracker.reset(); gesture.reset(); });
+$('mirror').addEventListener('change', e => { mirror = e.target.checked; cam.setMirror(mirror); tracker.reset(); gesture.reset(); fx.setTarget(null); });
 document.querySelectorAll('[name=look]').forEach(r =>
   r.addEventListener('change', e => { look = e.target.value; dbg.set('look', look); }));
 dbg.set('look', look);

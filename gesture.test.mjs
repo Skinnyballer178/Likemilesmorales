@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OneEuro } from '../src/filters.js';
-import { createHandTracker } from '../src/hands.js';
-import { createFrameGesture, evaluate } from '../src/gesture.js';
-import { GESTURE } from '../src/config.js';
-import { frameHands, rect, rng, gauss } from '../tools/synth.mjs';
-import { replay } from '../tools/replay.mjs';
+import { OneEuro } from './filters.js';
+import { createHandTracker } from './hands.js';
+import { createFrameGesture, evaluate } from './gesture.js';
+import { GESTURE } from './config.js';
+import { frameHands, rect, rng, gauss } from './synth.mjs';
+import { replay } from './replay.mjs';
 
 const DT = 1000 / 30, A = 16 / 9;
 // Build frames: fn(i) -> raw hands (or [] for a dropout)

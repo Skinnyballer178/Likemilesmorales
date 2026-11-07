@@ -1,1 +1,11 @@
-{ "name": "suit-up", "private": true, "type": "module", "scripts": { "test": "node --test" } }
+{
+  "name": "suit-up",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "test:gl": "xvfb-run -a node --test windowgl.test.mjs",
+    "preview": "xvfb-run -a node render-preview.mjs preview"
+  },
+  "optionalDependencies": { "gl": "^8.1.6" }
+}
