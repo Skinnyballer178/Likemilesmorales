@@ -1,8 +1,8 @@
-// Suit look renderer (Session 6). WebGL1 on its own canvas (#suit), own requestAnimationFrame loop, same pattern as windowgl.js.
+// Suit + Jacket look renderer (Sessions 6 and 7). WebGL1 on its own canvas (#suit), own requestAnimationFrame loop, same pattern as windowgl.js.
 // Inputs (all read-only): the packed person mask (R person, B skin, A clothes), the measured body (suitmodel.js) and the wrist bands.
 // Output: premultiplied RGBA, transparent everywhere except the suit on the body. The face/hair are never painted (S9 owns the face).
 import { SUIT, SEG } from './config.js';
-import { analyzeBody, createBodyTracker, wristBands } from './suitmodel.js';
+import { analyzeBody, createBodyTracker, wristBands, armSides } from './suitmodel.js';
 import { maskFresh } from './segmask.js';
 
 const VS = `attribute vec2 aPos; void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
@@ -12,7 +12,7 @@ precision highp float;
 #else
 precision mediump float;
 #endif
-uniform vec2 uRes; uniform float uAspect, uMaskOn, uLo, uHi, uAlpha, uAlphaRed;
+uniform vec2 uRes; uniform float uAspect, uMaskOn, uLo, uHi, uAlpha, uAlphaRed, uLook;   // uLook: 0 = Suit, 1 = Jacket
 uniform sampler2D uMask;
 uniform vec4 uHead;      // cx, cy, rx, ry   (aspect space)
 uniform vec3 uChest;     // x, y, width      (aspect space)
@@ -22,6 +22,9 @@ uniform vec3 uHand0, uHand1;     // x, y, radius (0 = off)
 uniform vec3 uRed, uBase;
 uniform vec4 uWeb;       // spokes, line width, rings, sag
 uniform float uEmblem;   // ring radius (chest-width units)
+uniform vec4 uJac;       // bulk, baffle spacing, torso top y, jacket alpha
+uniform vec4 uArmL, uArmR;   // sleeve start x, y and direction x, y
+uniform vec3 uBlue, uBlueDk, uHoodRed, uHoodie;
 
 float segD(vec2 p, vec2 a, vec2 b){ vec2 pa = p - a, ba = b - a; float t = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * t); }
 float handMask(vec2 p, vec3 hd){ return hd.z > 0.0 ? 1.0 - smoothstep(hd.z * 0.85, hd.z * 1.1, length(p - hd.xy)) : 0.0; }
@@ -31,19 +34,10 @@ float bandMask(vec2 p, vec4 b, vec3 sz){
   float e = 1.5 / uRes.y;
   return (1.0 - smoothstep(sz.x - e, sz.x + e, abs(along))) * (1.0 - smoothstep(sz.y - e, sz.y + e, abs(across)));
 }
+vec4 over(vec4 top, vec4 bot){ return top + bot * (1.0 - top.a); }   // premultiplied
 
-void main(){
-  vec2 pn = vec2(gl_FragCoord.x / uRes.x, 1.0 - gl_FragCoord.y / uRes.y);
-  vec2 p = vec2(pn.x * uAspect, pn.y);
-  vec4 m = texture2D(uMask, pn);
-  float person = smoothstep(uLo, uHi, m.r) * uMaskOn;
-  float cover = clamp(m.b + m.a, 0.0, 1.0) * person;                       // skin or clothes; hair is never covered
-  float head = 1.0 - smoothstep(0.85, 1.1, length((p - uHead.xy) / uHead.zw));
-  float hand = max(handMask(p, uHand0), handMask(p, uHand1));
-  float a = cover * (1.0 - head * (1.0 - hand));
-  if (a <= 0.003) { gl_FragColor = vec4(0.0); return; }
-
-  // web: spokes + sagging rings around the chest, in chest-width units
+// Suit fabric: black with fine red web (spokes + sagging rings around the chest). withEmblem = 1 adds the ringed spider and the wrist bands (Suit look only).
+vec3 suitRGB(vec2 p, float withEmblem, out float redOut){
   vec2 q = (p - uChest.xy) / uChest.z; float r = length(q), ang = atan(q.y, q.x);
   float pxq = 1.5 / uRes.y / uChest.z;
   float u = ang * uWeb.x / 6.2831853, fu = fract(u);
@@ -54,24 +48,101 @@ void main(){
   float rg = min(fv, 1.0 - fv) * (r2 * 5.0 + 1.0) / (5.0 * uWeb.z);
   float lw = uWeb.y;
   float web = max(1.0 - smoothstep(lw, lw + pxq, sp), 1.0 - smoothstep(lw * 0.8, lw * 0.8 + pxq, rg)) * smoothstep(0.03, 0.09, r);
+  float emb = 0.0, band = 0.0;
+  if (withEmblem > 0.5) {
+    float ER = uEmblem;
+    float ring = 1.0 - smoothstep(0.011, 0.011 + pxq, abs(r - ER));
+    vec2 s = vec2(abs(q.x), q.y);
+    float body = max(1.0 - smoothstep(1.0, 1.0 + pxq / 0.03, length(vec2(q.x / 0.032, (q.y - 0.03) / 0.045))), 1.0 - smoothstep(1.0, 1.0 + pxq / 0.02, length(vec2(q.x / 0.02, (q.y + 0.03) / 0.02))));
+    float lg = 1e3;
+    lg = min(lg, min(segD(s, vec2(0.012, -0.03), vec2(0.06, -0.075)), segD(s, vec2(0.06, -0.075), vec2(0.1, -0.06))));
+    lg = min(lg, min(segD(s, vec2(0.015, -0.01), vec2(0.07, -0.035)), segD(s, vec2(0.07, -0.035), vec2(0.108, -0.01))));
+    lg = min(lg, min(segD(s, vec2(0.015, 0.02), vec2(0.07, 0.03)), segD(s, vec2(0.07, 0.03), vec2(0.1, 0.06))));
+    lg = min(lg, min(segD(s, vec2(0.012, 0.045), vec2(0.055, 0.08)), segD(s, vec2(0.055, 0.08), vec2(0.075, 0.115))));
+    float legs = 1.0 - smoothstep(0.006, 0.006 + pxq, lg);
+    emb = max(ring, max(body, legs));
+    web *= smoothstep(ER, ER + 0.03, r);                                       // keep the emblem clear of web lines
+    band = max(bandMask(p, uBand0, uBandSz0), bandMask(p, uBand1, uBandSz1));
+  }
+  redOut = clamp(max(max(web * 0.85, emb), band), 0.0, 1.0);
+  return mix(uBase, uRed, redOut);
+}
 
-  // emblem: ring + simple geometric spider (original, drawn from ellipses and segments)
-  float ER = uEmblem;
-  float ring = 1.0 - smoothstep(0.011, 0.011 + pxq, abs(r - ER));
-  vec2 s = vec2(abs(q.x), q.y);
-  float body = max(1.0 - smoothstep(1.0, 1.0 + pxq / 0.03, length(vec2(q.x / 0.032, (q.y - 0.03) / 0.045))), 1.0 - smoothstep(1.0, 1.0 + pxq / 0.02, length(vec2(q.x / 0.02, (q.y + 0.03) / 0.02))));
-  float lg = 1e3;
-  lg = min(lg, min(segD(s, vec2(0.012, -0.03), vec2(0.06, -0.075)), segD(s, vec2(0.06, -0.075), vec2(0.1, -0.06))));
-  lg = min(lg, min(segD(s, vec2(0.015, -0.01), vec2(0.07, -0.035)), segD(s, vec2(0.07, -0.035), vec2(0.108, -0.01))));
-  lg = min(lg, min(segD(s, vec2(0.015, 0.02), vec2(0.07, 0.03)), segD(s, vec2(0.07, 0.03), vec2(0.1, 0.06))));
-  lg = min(lg, min(segD(s, vec2(0.012, 0.045), vec2(0.055, 0.08)), segD(s, vec2(0.055, 0.08), vec2(0.075, 0.115))));
-  float legs = 1.0 - smoothstep(0.006, 0.006 + pxq, lg);
-  float emb = max(ring, max(body, legs));
-  web *= smoothstep(ER, ER + 0.03, r);                                         // keep the emblem clear of web lines
+// ---- Jacket look ----
+float pillow(float v){ float f = fract(v); return 0.58 + 0.42 * pow(max(sin(3.14159265 * f), 0.0), 0.7); }   // bright in the middle of a baffle, dark at the seams
+float seamLine(float v){ float f = fract(v); return 1.0 - smoothstep(0.0, 0.045, min(f, 1.0 - f)); }
+float coverAt(vec2 t){                                                       // body coverage used for the puffer bulk (face skin above the chin does not bulk out)
+  vec4 s = texture2D(uMask, t);
+  return smoothstep(uLo, uHi, s.r) * clamp(s.a + s.b * step(uHead.y + uHead.w * 0.9, t.y), 0.0, 1.0);
+}
+vec3 jacketRGB(vec2 p, float cov0){
+  float cw = uChest.z; vec2 q = (p - uChest.xy) / cw;
+  float sw = smoothstep(0.40, 0.52, abs(q.x));                                // 0 = torso rows, 1 = sleeve rows (follow the arm)
+  vec4 arm = q.x > 0.0 ? uArmR : uArmL;
+  float vT = q.y / uJac.y, vA = dot((p - arm.xy) / cw, arm.zw) / uJac.y;
+  float shade = mix(pillow(vT), pillow(vA), sw), sm = mix(seamLine(vT), seamLine(vA), sw);
+  vec3 c = mix(uBlue * shade, uBlueDk, sm * 0.8);
+  c = mix(c, uBlueDk * 0.6, (1.0 - smoothstep(0.008, 0.016, abs(q.x))) * (1.0 - sw));   // zip
+  return c * (0.72 + 0.28 * cov0);                                            // darker on the bulk fringe
+}
+vec4 jacketLook(vec2 p, vec2 pn, vec4 m, float person){
+  float cw = uChest.z;
+  float cov0 = clamp(m.b + m.a, 0.0, 1.0) * person;
+  float R = uJac.x * cw; vec2 o = vec2(R / uAspect, R); vec2 d = o * 0.7071;
+  float t1 = coverAt(pn + vec2(o.x, 0.0)), t2 = coverAt(pn - vec2(o.x, 0.0)), t3 = coverAt(pn + vec2(0.0, o.y)), t4 = coverAt(pn - vec2(0.0, o.y));
+  float t5 = coverAt(pn + d), t6 = coverAt(pn - d), t7 = coverAt(pn + vec2(d.x, -d.y)), t8 = coverAt(pn + vec2(-d.x, d.y));
+  float mx = max(max(max(t1, t2), max(t3, t4)), max(max(t5, t6), max(t7, t8))), av = (t1 + t2 + t3 + t4 + t5 + t6 + t7 + t8) / 8.0;
+  float cov1 = max(cov0, mx * 0.7 + av * 0.3);                                // puffer silhouette: the body plus its bulk
+  float head = 1.0 - smoothstep(0.85, 1.1, length((p - uHead.xy) / uHead.zw));
+  float hand = max(handMask(p, uHand0), handMask(p, uHand1));
+  float glove = hand * clamp(m.b, 0.0, 1.0) * person;                         // hands (skin) stay in front of the sleeves
 
-  float band = max(bandMask(p, uBand0, uBandSz0), bandMask(p, uBand1, uBandSz1));
-  float red = clamp(max(max(web * 0.85, emb), band), 0.0, 1.0);
-  vec3 col = mix(uBase, uRed, red);
+  float aj = cov1 * (1.0 - head) * uJac.w;
+  vec3 jc = jacketRGB(p, cov0);
+  float cuff = max(bandMask(p, uBand0, uBandSz0), bandMask(p, uBand1, uBandSz1));
+  jc = mix(jc, uBlueDk, cuff * 0.9); aj = max(aj, cuff * 0.97 * cov1);
+  vec4 res = vec4(jc * aj, aj);
+
+  // inner red hoodie at the neckline (darker toward its edge) with two drawstrings
+  vec2 nc = vec2(uHead.x, uJac.z + 0.14 * cw);
+  float hn = length((p - nc) / vec2(0.22 * cw, 0.13 * cw));
+  float hdie = 1.0 - smoothstep(0.92, 1.0, hn);
+  float str = 1.0 - smoothstep(0.004, 0.008, min(segD(p, nc + vec2(-0.045 * cw, 0.0), nc + vec2(-0.05 * cw, 0.22 * cw)), segD(p, nc + vec2(0.045 * cw, 0.0), nc + vec2(0.05 * cw, 0.22 * cw))));
+  vec3 hc3 = mix(uHoodie * (1.0 - 0.35 * hn), vec3(0.85, 0.8, 0.78), str * 0.8);
+  res = over(vec4(hc3 * hdie, hdie), res);
+
+  // red hood up: outer shape = ellipse around the head + a cowl down to the shoulders, with the face opening cut out of it
+  vec2 hc = uHead.xy, hr = uHead.zw;
+  float e2 = length((p - hc - vec2(0.0, -0.10 * hr.y)) / (hr * vec2(1.45, 1.30)));
+  float yEnd = uJac.z + 0.10 * cw, capeT = clamp((p.y - hc.y) / max(yEnd - hc.y, 1e-3), 0.0, 1.0);
+  float capeW = hr.x * mix(1.45, 2.1, capeT) * (1.0 - 0.3 * smoothstep(0.75, 1.0, capeT));   // cowl narrows toward its lower edge
+  float cape = (1.0 - smoothstep(capeW * 0.92, capeW, abs(p.x - hc.x))) * step(hc.y, p.y) * (1.0 - smoothstep(yEnd - 0.06 * cw, yEnd, p.y));
+  float outer = max(1.0 - smoothstep(0.96, 1.0, e2), cape);
+  float eo = length((p - hc - vec2(0.0, 0.02 * hr.y)) / (hr * vec2(0.84, 0.92)));
+  float opening = 1.0 - smoothstep(0.96, 1.0, eo);
+  float hoodA = outer * (1.0 - opening) * 0.98;
+  float ang = atan(p.y - hc.y, p.x - hc.x);
+  vec3 hcol = uHoodRed * (0.45 + 0.55 * smoothstep(1.0, 1.4, eo)) * (0.92 + 0.08 * sin(ang * 6.0));   // dark lining next to the face, light folds outside
+  res = over(vec4(hcol * hoodA, hoodA), res);
+
+  // hands in front of everything
+  float rd; vec3 gc = suitRGB(p, 0.0, rd);
+  float ga = glove * mix(uAlpha, uAlphaRed, rd);
+  return over(vec4(gc * ga, ga), res);
+}
+
+void main(){
+  vec2 pn = vec2(gl_FragCoord.x / uRes.x, 1.0 - gl_FragCoord.y / uRes.y);
+  vec2 p = vec2(pn.x * uAspect, pn.y);
+  vec4 m = texture2D(uMask, pn);
+  float person = smoothstep(uLo, uHi, m.r) * uMaskOn;
+  if (uLook > 0.5) { gl_FragColor = jacketLook(p, pn, m, person); return; }
+  float cover = clamp(m.b + m.a, 0.0, 1.0) * person;                       // skin or clothes; hair is never covered
+  float head = 1.0 - smoothstep(0.85, 1.1, length((p - uHead.xy) / uHead.zw));
+  float hand = max(handMask(p, uHand0), handMask(p, uHand1));
+  float a = cover * (1.0 - head * (1.0 - hand));
+  if (a <= 0.003) { gl_FragColor = vec4(0.0); return; }
+  float red; vec3 col = suitRGB(p, 1.0, red);
   float al = a * mix(uAlpha, uAlphaRed, red);
   gl_FragColor = vec4(col * al, al);
 }`;
@@ -95,11 +166,12 @@ export function createSuitRenderer({ canvas, gl: ext, width, height, config = SU
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   gl.disable(gl.BLEND); gl.disable(gl.DEPTH_TEST);
-  const U = {}; for (const n of ['uRes', 'uAspect', 'uMaskOn', 'uLo', 'uHi', 'uAlpha', 'uAlphaRed', 'uMask', 'uHead', 'uChest', 'uBand0', 'uBand1', 'uBandSz0', 'uBandSz1', 'uHand0', 'uHand1', 'uRed', 'uBase', 'uWeb', 'uEmblem']) U[n] = gl.getUniformLocation(prog, n);
+  const U = {}; for (const n of ['uRes', 'uAspect', 'uMaskOn', 'uLo', 'uHi', 'uAlpha', 'uAlphaRed', 'uMask', 'uHead', 'uChest', 'uBand0', 'uBand1', 'uBandSz0', 'uBandSz1', 'uHand0', 'uHand1', 'uRed', 'uBase', 'uWeb', 'uEmblem', 'uLook', 'uJac', 'uArmL', 'uArmR', 'uBlue', 'uBlueDk', 'uHoodRed', 'uHoodie']) U[n] = gl.getUniformLocation(prog, n);
   gl.uniform1i(U.uMask, 0); gl.uniform1f(U.uLo, seg.edge[0]); gl.uniform1f(U.uHi, seg.edge[1]);
   gl.uniform1f(U.uAlpha, config.alpha); gl.uniform1f(U.uAlphaRed, config.alphaRed);
   gl.uniform3fv(U.uRed, config.red); gl.uniform3fv(U.uBase, config.base);
   gl.uniform4f(U.uWeb, config.web.spokes, config.web.line, config.web.rings, config.web.sag); gl.uniform1f(U.uEmblem, config.emblemR);
+  const J = config.jacket; gl.uniform3fv(U.uBlue, J.blue); gl.uniform3fv(U.uBlueDk, J.blueDark); gl.uniform3fv(U.uHoodRed, J.hoodRed); gl.uniform3fv(U.uHoodie, J.hoodie);
 
   const tex = gl.createTexture(); let texW = 1, texH = 1, maskOn = false, dirty = true;
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -118,11 +190,16 @@ export function createSuitRenderer({ canvas, gl: ext, width, height, config = SU
   function clear() { const { w, h } = size(); gl.viewport(0, 0, w, h); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); dirty = false; }
 
   // body: from the body tracker (normalised). bands: wristBands() output (aspect space). Returns true if something was drawn.
-  function draw({ body, bands = [], aspect = 16 / 9 }) {
+  function draw({ body, bands = [], aspect = 16 / 9, look = 'suit' }) {
     if (!maskOn || !body) { if (dirty) clear(); return false; }
     const { w, h } = size(); gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.uniform2f(U.uRes, w, h); gl.uniform1f(U.uAspect, aspect); gl.uniform1f(U.uMaskOn, 1);
+    gl.uniform2f(U.uRes, w, h); gl.uniform1f(U.uAspect, aspect); gl.uniform1f(U.uMaskOn, 1); gl.uniform1f(U.uLook, look === 'jacket' ? 1 : 0);
+    if (look === 'jacket') {
+      const arms = armSides(bands, body, aspect, config);
+      gl.uniform4f(U.uJac, config.jacket.bulk, config.jacket.baffle, body.torso, config.jacket.alpha);
+      gl.uniform4f(U.uArmL, arms.left.x, arms.left.y, arms.left.dx, arms.left.dy); gl.uniform4f(U.uArmR, arms.right.x, arms.right.y, arms.right.dx, arms.right.dy);
+    }
     gl.uniform4f(U.uHead, body.head.cx * aspect, body.head.cy, Math.max(body.head.rx * aspect, 1e-3), Math.max(body.head.ry, 1e-3));
     gl.uniform3f(U.uChest, body.chest.x * aspect, body.chest.y, body.chest.s * aspect);
     const [b0, b1] = [bands[0], bands[1]];
@@ -145,13 +222,13 @@ export function createSuitFx({ canvas, config = SUIT } = {}) {
   try { renderer = createSuitRenderer({ canvas, config }); } catch (e) { console.error(e); }
   const tracker = createBodyTracker(config);
   const stats = { ok: !!renderer, fps: 0, ms: 0, body: '-' };
-  let raf = 0, running = false, active = true, aspect = 16 / 9, bands = [], rawHands = [], stamp = null, frames = 0, msAcc = 0, lastFps = 0, shown = false;
+  let raf = 0, running = false, active = true, look = 'suit', aspect = 16 / 9, bands = [], rawHands = [], stamp = null, frames = 0, msAcc = 0, lastFps = 0, shown = false;
 
   function loop(now) {
     if (!running) return;
     const t0 = performance.now();
     if (!active || !maskFresh(now, stamp)) { if (shown && renderer) { renderer.clear(); shown = false; } }   // off, or a stalled segmenter: show the plain camera picture
-    else if (renderer) shown = renderer.draw({ body: tracker.body, bands, aspect });
+    else if (renderer) shown = renderer.draw({ body: tracker.body, bands, aspect, look });
     msAcc += performance.now() - t0; frames++;
     if (now - lastFps >= 1000) { stats.fps = frames; stats.ms = msAcc / frames; frames = 0; msAcc = 0; lastFps = now; }
     raf = requestAnimationFrame(loop);
@@ -159,11 +236,12 @@ export function createSuitFx({ canvas, config = SUIT } = {}) {
   return {
     stats,
     setActive(v) { active = !!v; },
+    setLook(v) { look = v === 'jacket' ? 'jacket' : 'suit'; },
     setMask(mask) {
       if (!renderer) return;
       if (!mask) { stamp = null; tracker.reset(); renderer.setMask(null); stats.body = '-'; return; }
       stamp = performance.now();
-      const b = tracker.update(analyzeBody(mask, config), stamp);
+      const b = tracker.update(analyzeBody(mask, config, { hands: bands, aspect }), stamp);
       stats.body = b ? `head ${b.head.cx.toFixed(2)},${b.head.cy.toFixed(2)} · chest ${b.chest.x.toFixed(2)},${b.chest.y.toFixed(2)} w ${b.chest.s.toFixed(2)} · ${b.usedClothes ? 'clothes' : 'fallback'}` : 'nobody';
       try { renderer.setMask(mask); } catch (e) { console.error(e); stamp = null; }
     },

@@ -11,6 +11,8 @@ import { createFaceDetector } from './facetracker.js';
 import { buildSeam } from './faceseam.js';
 import { drawFaceOverlay } from './faceoverlay.js';
 import { maskFresh } from './segmask.js';
+import { createSuitFx } from './suitgl.js';
+import { SUIT } from './config.js';
 
 const $ = id => document.getElementById(id);
 const dbg = createDebug();
@@ -18,6 +20,10 @@ let look = LOOKS[0], mirror = true;
 
 // Window layer (WebGL on #fx, own render loop). ?fx=mask or ?fx=uv shows the geometry test modes; ?calm=1 forces reduced-flash.
 const qs = new URLSearchParams(location.search);
+// Suit look (S6): its own canvas + render loop. ?suit=off disables it.
+const suitOff = qs.get('suit') === 'off' || !SUIT.enabled;
+const suit = createSuitFx({ canvas: $('suit') });
+const suitWanted = () => !suitOff && (look === 'suit' || look === 'jacket') && suit.ok;   // the body layer draws both looks (S7)
 const fx = createWindowFx({ canvas: $('fx'), mode: qs.get('fx') || 'normal', reducedFlash: qs.has('calm') ? true : undefined });
 
 const MESSAGES = {
@@ -49,13 +55,13 @@ async function loadSeg() { if (segOff || segLoading) return; segLoading = true; 
 function runSeg(canvas, hands) {
   const windowWanted = snap.state !== 'idle' || fx.stats.phase !== 'closed';   // arming counts, so the mask is ready by the time the frame locks
   const now = performance.now();
-  if (windowWanted) {
+  if (windowWanted || suitWanted()) {
     segIdleSince = null;
     const m = seg.process(canvas, now, hands);                                  // call BEFORE the debug overlay is drawn on the canvas
-    if (m) { fx.setMask(m); segActive = true; lastMask = m; lastMaskT = now; }
+    if (m) { fx.setMask(m); suit.setMask(m); segActive = true; lastMask = m; lastMaskT = now; }
   } else if (segActive) {
     if (segIdleSince === null) segIdleSince = now;
-    else if (now - segIdleSince > SEG.idleOffMs) { seg.pause(); fx.setMask(null); segActive = false; segIdleSince = null; lastMask = null; }
+    else if (now - segIdleSince > SEG.idleOffMs) { seg.pause(); fx.setMask(null); suit.setMask(null); segActive = false; segIdleSince = null; lastMask = null; }
   }
   if (dbg.on) dbg.set('seg stats', `${seg.delegate} · every ${seg.every} · ${seg.avgMs.toFixed(1)} ms · hands agree ${seg.agreement === null ? '-' : Math.round(seg.agreement * 100) + '%'} (${seg.agreementSamples}) ${seg.verdict}`);
 }
@@ -82,6 +88,7 @@ function runFace(video, canvas) {
 // ---- hands + gesture ----
 const tracker = createHandTracker();
 const gesture = createFrameGesture(undefined, (s, prev) => { dbg.set('gesture', `${prev} → ${s}`); setHint(s); });
+let handsMs = 0;   // rolling average of one hand detection, shown in the FPS counter
 let detector = null, loading = false, lastVT = -1, lastTs = 0, errors = 0;
 let hands = [], snap = { state: 'idle', reason: '-', area: 0, corners: null, candidate: null, progress: 0 };
 let rec = null; // debug recorder: press R to start/stop, downloads a replay JSON
@@ -90,7 +97,7 @@ async function loadDetector(delegate) {
   loading = true; setHint('loading');
   try {
     detector = await loadHandLandmarker({ delegate });
-    dbg.set('hands', `${detector.delegate} delegate`); errors = 0; setHint(gesture.state); loadSeg(); loadFace();   // the segmentation and face models load after the hand model
+    dbg.set('hands', `${detector.delegate} delegate`); errors = 0; setHint(gesture.state);
   } catch (e) { console.error(e); detector = null; setHint('failed'); dbg.set('hands', 'load failed'); }
   loading = false;
 }
@@ -100,7 +107,8 @@ function detect(video, canvas) {
   lastVT = video.currentTime;
   const ts = lastTs = Math.max(performance.now(), lastTs + 1);
   let raw;
-  try { raw = detector.detect(video, ts); errors = 0; }
+  const dt0 = performance.now();
+  try { raw = detector.detect(video, ts); errors = 0; handsMs += (performance.now() - dt0 - handsMs) * 0.1; }
   catch (e) {
     console.error(e);
     if (++errors >= 3 && !loading) { const d = detector.delegate; detector.close(); detector = null; if (d !== 'CPU') loadDetector('CPU'); else setHint('failed'); }
@@ -120,27 +128,68 @@ const cam = createCamera({
     $('status').textContent = (MESSAGES[s] || '') + (detail && s !== 'running' ? ` ${detail}` : '');
     $('start').hidden = s === 'running' || s === 'requesting';
     dbg.set('state', s); dbg.set('video', detail);
-    if (s === 'running') { const st = $('stage'); st.style.aspectRatio = `${st.width} / ${st.height}`; fx.resize(st.width, st.height); fx.start(); }
-    else fx.stop();
+    if (s === 'running') { const st = $('stage'); st.style.aspectRatio = `${st.width} / ${st.height}`; fx.resize(st.width, st.height); fx.start(); suit.resize(st.width, st.height); suit.setLook(look); suit.setActive(suitWanted()); suit.start(); }
+    else { fx.stop(); suit.stop(); }
     if (s === 'running') { tracker.reset(); gesture.reset(); lastVT = -1; lastFaceVT = -1; faceTrack.reset(); if (!detector && !loading) loadDetector(); else if (detector) setHint('idle'); }
   },
   onFrame(canvas, ms, video) {
     const t0 = performance.now();
     detect(video, canvas);
     fx.setTarget(snap);
+    suit.setHands(hands);
+    camFrames++;
     runSeg(canvas, hands);
     runFace(video, canvas);
     if (dbg.on) { const g = canvas.getContext('2d'); drawOverlay(g, canvas.width, canvas.height, hands, snap); if (faceOn) drawFaceOverlay(g, canvas.width, canvas.height, face, seam); }
+    if (dbg.on) dbg.set('suit', `${suit.ok ? (suitWanted() ? 'on' : 'off') : 'WebGL unavailable'} · ${suit.stats.fps} fps · ${suit.stats.ms.toFixed(2)} ms/draw · ${suit.stats.body}`);
     dbg.set('draw+detect ms', (ms + performance.now() - t0).toFixed(1));
     dbg.set('window', fx.stats.ok ? `${fx.stats.phase} · ${fx.stats.fps} fps · ${fx.stats.ms.toFixed(2)} ms/draw${fx.reducedFlash ? ' · calm' : ''}` : 'WebGL unavailable'); dbg.tick();
   },
 });
 
-$('start').addEventListener('click', () => cam.start());
-$('mirror').addEventListener('change', e => { mirror = e.target.checked; cam.setMirror(mirror); tracker.reset(); gesture.reset(); fx.setTarget(null); seg.pause(); fx.setMask(null); segActive = false; lastMask = null; faceTrack.reset(); faceDet.pause(); seam = null; });
+// Start button (S6 startup fix): load every model and warm it up BEHIND a loading screen first, then open the camera, so the picture never freezes while models compile.
+let booting = false;
+const nextPaint = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+async function boot() {
+  if (booting) return; booting = true;
+  const say = t => { $('status').textContent = t; }, steps = 1 + (segOff ? 0 : 1) + (faceOn ? 1 : 0); let n = 0;
+  document.body.dataset.state = 'loading'; $('start').hidden = true;
+  const step = async (label, fn) => { say(`Loading ${label}… (${++n}/${steps}) The first visit takes a few seconds; later visits are quicker.`); await nextPaint(); await fn(); };
+  try {
+    await step('hand tracking', async () => { if (!detector) await loadDetector(); });
+    if (!detector) { say('Hand tracking could not load. Check your connection, then press Start again.'); document.body.dataset.state = 'idle'; $('start').hidden = false; return; }
+    if (!segOff) await step('body outline', () => loadSeg());
+    if (faceOn) await step('face tracking', () => loadFace());
+    say('Warming up…'); await nextPaint();
+    const c = document.createElement('canvas'); c.width = 320; c.height = 180; const g = c.getContext('2d'); if (g) { g.fillStyle = '#667'; g.fillRect(0, 0, 320, 180); }
+    try { detector.detect(c, (lastTs = Math.max(performance.now(), lastTs + 1))); detector.detect(c, (lastTs = Math.max(performance.now(), lastTs + 1))); } catch (e) { console.warn('hand warm-up failed', e); }
+    if (faceOn) faceDet.warmUp(c);
+    await nextPaint();
+    cam.start();
+  } finally { booting = false; }
+}
+$('start').addEventListener('click', boot);
+$('mirror').addEventListener('change', e => { mirror = e.target.checked; cam.setMirror(mirror); tracker.reset(); gesture.reset(); fx.setTarget(null); seg.pause(); fx.setMask(null); suit.setMask(null); segActive = false; lastMask = null; faceTrack.reset(); faceDet.pause(); seam = null; });
 document.querySelectorAll('[name=look]').forEach(r =>
-  r.addEventListener('change', e => { look = e.target.value; dbg.set('look', look); }));
+  r.addEventListener('change', e => { look = e.target.value; dbg.set('look', look); suit.setLook(look); suit.setActive(suitWanted()); if (!suitWanted()) suit.setMask(null); }));
 dbg.set('look', look);
+
+// FPS counter (top right of the picture): camera = pictures processed per second, screen = how often the browser redraws the page (drops when the page is lagging). ?fps=off hides it, the checkbox toggles it.
+let camFrames = 0, scrFrames = 0, fpsT = performance.now(), lastScr = performance.now(), worstGap = 0, freezes = 0;
+const fpsEl = $('fps'), fpsBox = $('showfps');
+fpsEl.hidden = qs.get('fps') === 'off'; fpsBox.checked = !fpsEl.hidden;
+fpsBox.addEventListener('change', () => { fpsEl.hidden = !fpsBox.checked; });
+(function scr(t) {
+  scrFrames++;
+  const gap = t - lastScr; lastScr = t; if (gap > worstGap) worstGap = gap; if (gap > 500) freezes++;   // a long gap between redraws = the page froze
+  if (t - fpsT >= 1000) {
+    const s = (t - fpsT) / 1000;
+    if (!fpsEl.hidden) fpsEl.textContent = `cam ${Math.round(camFrames / s)} · screen ${Math.round(scrFrames / s)} fps · hands ${handsMs.toFixed(0)} ms${segOff ? '' : ` · seg ${seg.avgMs.toFixed(0)} ms`} · worst gap ${Math.round(worstGap)} ms${freezes ? ` · freezes ${freezes}` : ''}`;
+    dbg.set('freezes', `${freezes} (gaps over 500 ms since start)`);
+    camFrames = scrFrames = 0; worstGap = 0; fpsT = t;
+  }
+  requestAnimationFrame(scr);
+})(performance.now());
 
 if (dbg.on) {
   addEventListener('keydown', e => {

@@ -60,3 +60,25 @@ test('wristBands: band sits past the wrist, away from the fingers; hand region c
   assert.equal(wristBands([], 1.7).length, 0);
   assert.equal(wristBands([{ pts: pts.slice(0, 5) }], 1.7).length, 0);
 });
+
+import { armSides } from './suitmodel.js';
+test('armSides: hanging arms point down and outward; a raised hand turns that sleeve toward the wrist', () => {
+  const body = { chest: { x: 0.5, y: 0.6, s: 0.4 }, torso: 0.5 }, A = 16 / 9;
+  const a = armSides([], body, A);
+  assert.ok(a.left.dx < 0 && a.right.dx > 0 && a.left.dy > 0.9 && a.right.dy > 0.9, 'hanging');
+  assert.ok(a.left.x < 0.5 * A && a.right.x > 0.5 * A, 'shoulders on each side of the chest');
+  const hand = { band: { x: 0.8 * A, y: 0.2 }, hand: {} };
+  const b = armSides([hand], body, A);
+  assert.ok(b.right.dy < 0, 'right sleeve points up toward the raised wrist'); assert.deepEqual([b.left.dx < 0, b.left.dy > 0.9], [true, true], 'left sleeve unchanged');
+  assert.ok(Math.abs(Math.hypot(b.right.dx, b.right.dy) - 1) < 1e-9, 'unit direction');
+});
+
+test('analyzeBody: a raised arm beside the head does not widen the head; tracked hands are ignored entirely', () => {
+  const w = 96, h = 54, make = withArm => { const m = person(); if (withArm) for (let y = 10; y < 22; y++) for (let x = 56; x < 76; x++) { const i = (y * w + x) * 4; m.data[i] = 255; m.data[i + 2] = 255; } return m; };
+  const plain = analyzeBody(make(false)), arm = analyzeBody(make(true));
+  const span = (arm.torso - arm.top) * h; assert.ok(arm.head.rx * w <= 0.48 * span + 1e-6, `arm touching the head: rx bounded by the head height (${(arm.head.rx * w).toFixed(1)} px vs span ${span.toFixed(1)})`);
+  // a tracked hand covering that arm region: ignored
+  const A = 1, hand = { hand: { x: 67 / 96 * A, y: 16 / 54, r: 7 / 54 } };
+  const withHand = analyzeBody(make(true), undefined, { hands: [hand], aspect: A });
+  assert.ok(Math.abs(withHand.head.cx - plain.head.cx) < 0.02 && withHand.top > 0.05);
+});

@@ -68,3 +68,53 @@ test('Suit: frame time and preview PNG', { skip }, () => {
   mkdirSync('preview-s6', { recursive: true });
   writeFileSync('preview-s6/suit.png', encodePNG(W, H, compositeOverCamera(W, H, read(), cam)));
 });
+
+// ---- Session 7: Jacket look ----
+const jacket = (r, s) => r.draw({ body: s.body, bands: s.bands, aspect: A, look: 'jacket' });
+
+test('Jacket: blue puffer on the torso, red hood around the head, face opening left clear, hand in front of the sleeve', { skip }, () => {
+  const r = createSuitRenderer({ gl, width: W, height: H }), s = scene(); r.setMask(s.mask);
+  assert.ok(jacket(r, s)); const px = read(), h = s.body.head;
+  const torso = []; for (let i = 0; i < 10; i++) torso.push(at(px, 0.3 + 0.04 * i, 0.82));
+  assert.ok(torso.every(p => p[3] > 220 && p[2] > p[0] * 1.5), 'torso is blue and opaque: ' + torso.join(' | '));
+  const face = at(px, h.cx, h.cy); assert.equal(face[3], 0, 'face opening stays clear: ' + face);
+  const hood = at(px, h.cx, h.cy - h.ry * 1.15); assert.ok(hood[3] > 220 && hood[0] > hood[2] * 3, 'hood above the head is red: ' + hood);
+  const hoodSide = at(px, h.cx - h.rx * 1.25, h.cy); assert.ok(hoodSide[3] > 220 && hoodSide[0] > hoodSide[2] * 3, 'hood beside the face is red: ' + hoodSide);
+  assert.equal(at(px, 0.05, 0.5)[3], 0, 'far background untouched');
+  const hand = at(px, 0.69, 0.33); assert.ok(hand[3] > 150 && hand[2] < 80, 'raised hand is a dark suit glove, over the hood/sleeve: ' + hand);
+});
+
+test('Jacket: puffer bulk grows the silhouette by about SUIT.jacket.bulk, and no further', { skip }, () => {
+  const r = createSuitRenderer({ gl, width: W, height: H }), s = scene(); r.setMask(s.mask); jacket(r, s); const px = read();
+  const bulkX = 0.07 * s.body.chest.s * A / A;                    // chest-width units -> picture-height units -> x units (divide by aspect)
+  const edge = 72 / 96;                                           // right edge of the torso in the mask
+  assert.ok(at(px, edge + bulkX * 0.4, 0.85)[3] > 80, 'inside the bulk band');
+  assert.equal(at(px, edge + bulkX * 2.5 + 0.02, 0.85)[3], 0, 'beyond the bulk band');
+});
+
+test('Jacket: quilting rows run across the torso (colour repeats down the chest, not across it)', { skip }, () => {
+  const r = createSuitRenderer({ gl, width: W, height: H }), s = scene(); r.setMask(s.mask); jacket(r, s); const px = read();
+  const col = y => at(px, 0.4, y)[2], variance = a => { const m = a.reduce((x, y) => x + y, 0) / a.length; return a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length; };
+  const down = [], across = []; for (let i = 0; i < 30; i++) { down.push(col(0.62 + i * 0.012)); across.push(at(px, 0.32 + i * 0.002, 0.8)[2]); }
+  assert.ok(variance(down) > 4 * variance(across), `rows vary down (${variance(down).toFixed(0)}) more than across (${variance(across).toFixed(0)})`);
+});
+
+test('Jacket: suit and jacket never mix (no red emblem in Jacket, no blue in Suit)', { skip }, () => {
+  const r = createSuitRenderer({ gl, width: W, height: H }), s = scene(); r.setMask(s.mask);
+  const blue = px => { let n = 0; for (let i = 0; i < px.length; i += 4) if (px[i + 3] > 200 && px[i + 2] > px[i] * 1.6 && px[i + 2] > 90) n++; return n; };
+  r.draw({ body: s.body, bands: s.bands, aspect: A, look: 'suit' }); assert.ok(blue(read()) < 50, 'no blue in Suit');
+  jacket(r, s); const px = read(); assert.ok(blue(px) > 3000, 'blue in Jacket');
+  const reds = px => { let n = 0; for (let y = 0.8; y < 0.98; y += 0.004) for (let x = 0.3; x < 0.7; x += 0.004) { const p = at(px, x, y); if (p[3] > 200 && p[0] > p[2] * 2) n++; } return n; };
+  assert.equal(reds(px), 0, 'no red web / emblem on the jacket body');
+  r.draw({ body: s.body, bands: s.bands, aspect: A, look: 'suit' }); assert.ok(reds(read()) > 200, 'the same area has red web in Suit');
+});
+
+test('Jacket: preview PNG and frame time', { skip }, () => {
+  const r = createSuitRenderer({ gl, width: W, height: H }), s = scene(); r.setMask(s.mask);
+  const t0 = performance.now(); for (let i = 0; i < 20; i++) { jacket(r, s); read(); }
+  const ms = (performance.now() - t0) / 20; console.log(`jacket draw+readback ${ms.toFixed(1)} ms (software GL, upper bound)`); assert.ok(ms < 200);
+  jacket(r, s);
+  const cam = (u, v) => { const m = s.mask, x = Math.min(m.w - 1, Math.floor(u * m.w)), y = Math.min(m.h - 1, Math.floor(v * m.h)), i = (y * m.w + x) * 4; return m.data[i + 2] ? [205, 160, 135] : m.data[i + 3] ? [70, 100, 160] : m.data[i] ? [200, 200, 200] : [90, 95, 105]; };
+  mkdirSync('preview-s7', { recursive: true });
+  writeFileSync('preview-s7/jacket.png', encodePNG(W, H, compositeOverCamera(W, H, read(), cam)));
+});

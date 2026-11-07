@@ -68,8 +68,11 @@ export function createFaceDetector({ loadApi = loadFaceApi, config = FACE, deleg
     return out;                                    // null = the model ran and saw no face
   }
 
+  // warm-up: run the model twice on a flat picture before the camera opens, so GPU shaders are compiled behind the loading screen (does not touch the governor or counters)
+  function warmUp(source) { if (status !== 'ready' || !model) return; try { model.detectForVideo(source, nextTs()); model.detectForVideo(source, nextTs()); } catch (e) { console.warn('face warm-up failed', e); } }
+
   return {
-    load, detect,
+    load, detect, warmUp,
     pause() { gov.reset(); },                      // nobody needs the face for a while: next detection starts a fresh cadence
     close() { try { model && model.close && model.close(); } catch { /* ignore */ } model = null; setStatus('idle'); },
     get status() { return status; }, get note() { return note; }, get delegate() { return used; },

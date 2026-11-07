@@ -53,7 +53,7 @@ export const WINDOW = {
 export const SEG_LABELS = ['background', 'hair', 'body-skin', 'face-skin', 'clothes', 'others'];
 export const SEG = {
   inputWidth: 384, inputHeight: 216, // size of the picture given to the model; masks come back this size. Smaller = faster, blockier
-  layers: ['person'],       // channels packed into the mask texture: person (R) = 1 - background; optional hair (G), skin (B), clothes (A). S6 and S11 switch more on
+  layers: ['person', 'skin', 'clothes'], // channels packed into the mask texture: person (R) = 1 - background; optional hair (G), skin (B), clothes (A). S6 (Suit) uses skin + clothes; S11 may add more
   tauMs: 70,                // temporal smoothing time constant for small changes (edge flicker). Lower = livelier, higher = steadier
   jumpLo: 0.15, jumpHi: 0.6, // |change| per pixel where smoothing is released: below jumpLo full smoothing, above jumpHi it follows instantly (no ghost trails)
   resetGapMs: 1000,         // a gap longer than this between masks restarts the smoother from the new mask
@@ -115,4 +115,34 @@ export const SEAM = {
   ],
   hair: { keep: 0.9, from: 0.55, to: 0.85 },  // hair in front of the forehead: removes up to `keep` of the mask between face heights `from`..`to` (0 below `from`)
   person: [0.30, 0.70],                       // the mask never leaves the person silhouette: soft threshold on the person value (same as SEG.edge)
+};
+
+// ---- Session 6: Suit look (body) ----
+// A WebGL layer (#suit) between the camera picture and the window layer. It paints the person's clothes and skin (below the
+// head, plus the hands) with a black suit: fine red web, a ringed spider emblem on the chest and red wrist bands. The face and
+// hair are left alone (S9 puts the mask there). The suit is drawn slightly see-through so the real folds and light show through.
+// All sizes below are fractions of the measured body, so the suit follows the person from any distance.
+export const SUIT = {
+  enabled: true,
+  tauMs: 120, resetGapMs: 600,            // smoothing of the measured body numbers (head, chest). Lower = livelier, higher = steadier
+  alpha: 0.9,                             // suit opacity on the body (1 = fully hides the real clothes; 0.9 keeps folds visible)
+  alphaRed: 0.97,                         // opacity of the red parts
+  personMin: 0.02,                        // a row counts as "person" when this share of its width is person (ignores specks)
+  torso: { minRowFrac: 0.4, rows: 3, startFrac: 0.10, fallbackFrac: 0.30 },  // torso top = first run of rows with >= 40% of the widest clothes row, no sooner than 10% down the person
+  head: { heightFrac: 0.8, rxScale: 0.7, ryScale: 1.2, maxRxToSpan: 0.48 },  // maxRxToSpan: head half-width never exceeds this x (person top -> torso top), so an arm touching the head cannot blow the hood up. Head ellipse: heightFrac = share of (person top -> torso top) that is head, rxScale = width factor on the median head width
+  chestDrop: 0.2,                         // chest centre = torso top + this share of the body height below it
+  web: { spokes: 14, line: 0.005, rings: 6, sag: 0.12 },                     // web geometry in chest-width units
+  emblemR: 0.14,                          // emblem ring radius, in chest-width units
+  band: { along: 0.45, half: 0.22, across: 0.62 },                           // wrist band: distance from the wrist, half length, half width (all x hand size, wrist to middle knuckle)
+  hand: { centre: 1.1, radius: 1.35 },                                       // hand region that is always suited, even above the neck line
+  red: [0.88, 0.07, 0.12], base: [0.025, 0.025, 0.04],
+  // Session 7: Jacket look = blue quilted puffer over the clothes/arms, red hood up, red inner hoodie at the neck. The suit stays only on the hands (in front of the sleeves).
+  jacket: {
+    bulk: 0.07,                 // puffer bulk: the silhouette grows this far past the body, in chest-width units
+    baffle: 0.16,               // quilting row spacing, chest-width units (rows run across the torso, and across each sleeve along the arm)
+    alpha: 0.97,                // jacket opacity (nearly hides the real clothes; the puffer is thick)
+    shoulderX: 0.42, shoulderDrop: 0.08, // sleeve start: sideways from the chest centre and down from the torso top, chest-width units
+    blue: [0.09, 0.20, 0.55], blueDark: [0.03, 0.07, 0.22],
+    hoodRed: [0.78, 0.06, 0.10], hoodie: [0.55, 0.04, 0.08],
+  },
 };
