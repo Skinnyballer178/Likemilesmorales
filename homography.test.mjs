@@ -46,3 +46,10 @@ test('windowGeometry: fully open = the corners (in aspect space); smaller hu/hv 
     assert.equal(g.hinv.length, 9);
   }
 });
+
+test('windowGeometry: winAspect is the real width/height of the frame in picture units', () => {
+  const g = windowGeometry([{ x: .2, y: .2 }, { x: .6, y: .2 }, { x: .6, y: .6 }, { x: .2, y: .6 }], 0.5, 0.5, 16 / 9);
+  assert.ok(Math.abs(g.winAspect - (0.4 * 16 / 9) / 0.4) < 1e-6);           // 0.4 of the width, 0.4 of the height
+  const t = windowGeometry([{ x: .4, y: .1 }, { x: .6, y: .1 }, { x: .6, y: .9 }, { x: .4, y: .9 }], 0.5, 0.5, 16 / 9);
+  assert.ok(Math.abs(t.winAspect - (0.2 * 16 / 9) / 0.8) < 1e-6);
+});

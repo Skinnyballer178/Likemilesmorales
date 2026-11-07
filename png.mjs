@@ -13,11 +13,11 @@ export function encodePNG(w, h, rgba) {
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 // Premultiplied GL pixels (bottom-up) -> opaque PNG pixels (top-down) composited over a fake "camera" gradient.
-export function compositeOverCamera(w, h, px) {
+export function compositeOverCamera(w, h, px, cam = null) {
   const out = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const s = ((h - 1 - y) * w + x) * 4, o = (y * w + x) * 4, a = px[s + 3] / 255;
-    const bg = [60 + 50 * (x / w), 62 + 40 * (y / h), 70 + 30 * (x / w)];
+    const bg = cam ? cam((x + 0.5) / w, (y + 0.5) / h) : [60 + 50 * (x / w), 62 + 40 * (y / h), 70 + 30 * (x / w)];
     for (let c = 0; c < 3; c++) out[o + c] = Math.min(255, px[s + c] + bg[c] * (1 - a));
     out[o + 3] = 255;
   }

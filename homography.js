@@ -52,7 +52,8 @@ export const toColumnMajor = m => new Float32Array([m[0][0], m[1][0], m[2][0], m
 // Everything the renderer needs for one frame, or null if the quad is unusable.
 //  corners: 4 normalized points TL,TR,BR,BL (the full frame the user made)
 //  hu, hv:  half-extent of the VISIBLE window in uv space (0.5 = fully open); the open/close animation shrinks these
-//  returns { H, hinv (column-major Float32Array), quad (Float32Array(8), visible corners in aspect space), visible (4 normalized points) }
+//  returns { H, hinv (column-major Float32Array), quad (Float32Array(8), visible corners in aspect space), visible (4 normalized points),
+//            winAspect (width/height of the FULL frame in picture units, used to keep background patterns undistorted) }
 export function windowGeometry(corners, hu = 0.5, hv = 0.5, aspect = 16 / 9) {
   const H = squareToQuad(corners);
   if (!H) return null;
@@ -62,7 +63,10 @@ export function windowGeometry(corners, hu = 0.5, hv = 0.5, aspect = 16 / 9) {
   const visible = uv.map(([u, v]) => applyH(H, u, v));
   const quad = new Float32Array(8);
   visible.forEach((p, i) => { quad[i * 2] = p.x * aspect; quad[i * 2 + 1] = p.y; });
-  return { H, hinv: toColumnMajor(Hi), quad, visible };
+  const dist = (a, b) => Math.hypot((a.x - b.x) * aspect, a.y - b.y);
+  const wTop = dist(corners[0], corners[1]), wBot = dist(corners[3], corners[2]), hL = dist(corners[0], corners[3]), hR = dist(corners[1], corners[2]);
+  const winAspect = Math.min(4, Math.max(0.25, (wTop + wBot) / Math.max(hL + hR, 1e-6)));
+  return { H, hinv: toColumnMajor(Hi), quad, visible, winAspect };
 }
 
 // Point-in-convex-quad (clockwise on screen, y down) in normalized coords; used by tests as the CPU ground truth.

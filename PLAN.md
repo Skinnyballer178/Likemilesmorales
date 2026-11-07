@@ -69,4 +69,10 @@ Rules (enforced by tests from S8 on, `independence.test.mjs`):
   reduced-flash hook: fx.setReducedFlash(bool) (defaults to OS reduce-motion; ?calm=1 forces it). Debug: ?debug=1 shows window phase/fps/ms; ?fx=mask or ?fx=uv for geometry views.
   Tests: `npm test` (25 tests; 6 GPU tests skip without headless GL), `npm run test:gl` (needs `npm i` + xvfb; 31 tests incl. mask-vs-polygon corner accuracy, uv decode, frame time).
   Files are flat in the repo root (no src/ or tools/ folders).
-- Next: S4 segmentation + window background (ImageSegmenter masks, neon background inside the window: replaces the placeholder fill via the uv in the shader). Segmentation masks are also reused by S11 (glitch body effects) and S12 (atmosphere).
+- S4 done: person segmentation + neon window background.
+  segmask.js (pure: layers, temporal smoothing, self-test checks, hand cross-check, cadence governor), segmenter.js (ImageSegmenter glue: CPU on iOS, GPU elsewhere with CPU fallback, self-test),
+  neonbg.js (procedural neon city in GLSL), windowgl.js (mask texture, person cut-out, rim light, ?fx=grid / ?fx=circle test modes), main.js (runs only while the window is wanted).
+  The model sees a 384x216 copy of the already-mirrored display canvas, so masks are in display orientation (mirror toggle needs nothing). Mask = packed RGBA (R person; G hair, B skin, A clothes when SEG.layers asks for them: S6/S11).
+  Self-test: labels (6, label 0 = background) + flat grey picture must be background + live check that detected palms lie inside the person mask. URL flags: ?seg=off, ?segdelegate=cpu|gpu, ?segtest=off, ?fx=grid, ?fx=circle, ?debug=1 (seg line).
+  NOT yet verified: the real model (no access to its host from the build sandbox). Thresholds in SEG.selfTest and SEG.edge are first guesses to tune from the S4 live check. Tests: `npm test` (63 tests, 15 GPU ones skip without headless GL), `npm run test:gl`.
+- Next: S5 face (FaceLandmarker mask-ready mesh, hair/neck seam).

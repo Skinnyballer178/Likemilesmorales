@@ -1,0 +1,27 @@
+import createGL from 'gl';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { createWindowRenderer } from './windowgl.js';
+import { createWindowController } from './windowctl.js';
+import { rect } from './synth.mjs';
+import { encodePNG, compositeOverCamera } from './png.mjs';
+import { personMask, fakeCamera } from './synthmask.mjs';
+import { createMaskSmoother } from './segmask.js';
+const out = process.argv[2] || 'prev', W = 960, H = 540, A = W / H;
+mkdirSync(out, { recursive: true });
+const gl = createGL(W, H, { preserveDrawingBuffer: true, premultipliedAlpha: true });
+const r = createWindowRenderer({ gl, width: W, height: H });
+const MW = 384, MH = 216;
+const opt = { cx: 0.42, hand: { x: 0.70, y: 0.62 } };
+const sm = createMaskSmoother();
+const mask = sm.update({ person: personMask(MW, MH, { ...opt, noise: 0.05 }) }, MW, MH, 0);
+const q = rect(0.58, 0.5, 0.40, 0.78, 6, A), quad = [q.tl, q.tr, q.br, q.bl];
+const shot = (name, { tMs = 900, reduced = false, withMask = true, mode = 'normal', timeS = 10 } = {}) => {
+  const c = createWindowController(); c.setTarget(quad); let f; for (let t = 0; t <= tMs; t += 1000 / 60) f = c.step(t);
+  r.setMask(withMask ? mask : null);
+  r.draw(f, { aspect: A, timeS, reduced, mode });
+  const px = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  writeFileSync(`${out}/${name}.png`, encodePNG(W, H, compositeOverCamera(W, H, px, fakeCamera(opt))));
+};
+shot('1-neon-with-person'); shot('2-neon-no-mask', { withMask: false }); shot('3-neon-reduced', { reduced: true }); shot('4-grid-mode', { mode: 'grid' }); shot('5-opening', { tMs: 250 });
+shot('6-later', { timeS: 14 });
+console.log('ok');

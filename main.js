@@ -1,10 +1,11 @@
 import { createCamera } from './camera.js';
 import { createDebug } from './debug.js';
-import { LOOKS } from './config.js';
+import { LOOKS, SEG } from './config.js';
 import { loadHandLandmarker, createHandTracker, toRecorded } from './hands.js';
 import { createFrameGesture } from './gesture.js';
 import { drawOverlay } from './overlay.js';
 import { createWindowFx } from './windowgl.js';
+import { createSegmenter } from './segmenter.js';
 
 const $ = id => document.getElementById(id);
 const dbg = createDebug();
@@ -32,6 +33,25 @@ const HINTS = {
 };
 const setHint = key => { const el = $('hint'); if (el.dataset.k !== key) { el.dataset.k = key; el.textContent = HINTS[key] || ''; } };
 
+// ---- person segmentation (S4): runs only while the window is (about to be) open. ?seg=off disables it, ?segdelegate=cpu|gpu forces a delegate, ?segtest=off skips the self-test.
+const segOff = qs.get('seg') === 'off';
+const seg = createSegmenter({ onStatus: (s, n) => dbg.set('seg', `${s}${n ? ' · ' + n : ''}`) });
+let segLoading = false, segActive = false, segIdleSince = null;
+async function loadSeg() { if (segOff || segLoading) return; segLoading = true; await seg.load(); }
+function runSeg(canvas, hands) {
+  const windowWanted = snap.state !== 'idle' || fx.stats.phase !== 'closed';   // arming counts, so the mask is ready by the time the frame locks
+  const now = performance.now();
+  if (windowWanted) {
+    segIdleSince = null;
+    const m = seg.process(canvas, now, hands);                                  // call BEFORE the debug overlay is drawn on the canvas
+    if (m) { fx.setMask(m); segActive = true; }
+  } else if (segActive) {
+    if (segIdleSince === null) segIdleSince = now;
+    else if (now - segIdleSince > SEG.idleOffMs) { seg.pause(); fx.setMask(null); segActive = false; segIdleSince = null; }
+  }
+  if (dbg.on) dbg.set('seg stats', `${seg.delegate} · every ${seg.every} · ${seg.avgMs.toFixed(1)} ms · hands agree ${seg.agreement === null ? '-' : Math.round(seg.agreement * 100) + '%'} (${seg.agreementSamples}) ${seg.verdict}`);
+}
+
 // ---- hands + gesture ----
 const tracker = createHandTracker();
 const gesture = createFrameGesture(undefined, (s, prev) => { dbg.set('gesture', `${prev} → ${s}`); setHint(s); });
@@ -43,7 +63,7 @@ async function loadDetector(delegate) {
   loading = true; setHint('loading');
   try {
     detector = await loadHandLandmarker({ delegate });
-    dbg.set('hands', `${detector.delegate} delegate`); errors = 0; setHint(gesture.state);
+    dbg.set('hands', `${detector.delegate} delegate`); errors = 0; setHint(gesture.state); loadSeg();   // the segmentation model loads after the hand model
   } catch (e) { console.error(e); detector = null; setHint('failed'); dbg.set('hands', 'load failed'); }
   loading = false;
 }
@@ -81,6 +101,7 @@ const cam = createCamera({
     const t0 = performance.now();
     detect(video, canvas);
     fx.setTarget(snap);
+    runSeg(canvas, hands);
     if (dbg.on) drawOverlay(canvas.getContext('2d'), canvas.width, canvas.height, hands, snap);
     dbg.set('draw+detect ms', (ms + performance.now() - t0).toFixed(1));
     dbg.set('window', fx.stats.ok ? `${fx.stats.phase} · ${fx.stats.fps} fps · ${fx.stats.ms.toFixed(2)} ms/draw${fx.reducedFlash ? ' · calm' : ''}` : 'WebGL unavailable'); dbg.tick();
@@ -88,7 +109,7 @@ const cam = createCamera({
 });
 
 $('start').addEventListener('click', () => cam.start());
-$('mirror').addEventListener('change', e => { mirror = e.target.checked; cam.setMirror(mirror); tracker.reset(); gesture.reset(); fx.setTarget(null); });
+$('mirror').addEventListener('change', e => { mirror = e.target.checked; cam.setMirror(mirror); tracker.reset(); gesture.reset(); fx.setTarget(null); seg.pause(); fx.setMask(null); segActive = false; });
 document.querySelectorAll('[name=look]').forEach(r =>
   r.addEventListener('change', e => { look = e.target.value; dbg.set('look', look); }));
 dbg.set('look', look);

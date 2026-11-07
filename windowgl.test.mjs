@@ -127,3 +127,122 @@ test('frame time and previews', { skip }, () => {
   assert.ok(ms[142] < 250);
   const dir = process.env.PREVIEW_DIR; if (dir) { mkdirSync(dir, { recursive: true }); const px = new Uint8Array(w * h * 4); big.readPixels(0, 0, w, h, big.RGBA, big.UNSIGNED_BYTE, px); writeFileSync(`${dir}/last-frame.png`, encodePNG(w, h, compositeOverCamera(w, h, px))); }
 });
+
+// ---------------- Session 4: person cut-out, neon background, rim light ----------------
+import { personMask } from './synthmask.mjs';
+import { createMaskSmoother } from './segmask.js';
+const MW = 192, MH = 108;
+const packed = (opt = {}) => createMaskSmoother().update({ person: personMask(MW, MH, { aspect: A, ...opt }) }, MW, MH, 0);
+const bigQuad = rect(0.5, 0.5, 0.9, 0.9, 0, A), BQ = [bigQuad.tl, bigQuad.tr, bigQuad.br, bigQuad.bl];
+const open = { visible: true, corners: BQ, hu: 0.5, hv: 0.5, flash: 0 };
+const alphaAt = (px, x, y) => px[((H - 1 - y) * W + x) * 4 + 3];
+const rgbAt = (px, x, y) => { const i = ((H - 1 - y) * W + x) * 4; return [px[i], px[i + 1], px[i + 2]]; };
+
+test('cut-out: the person stays visible (window transparent there), the rest is covered by the background', { skip }, () => {
+  const r = createWindowRenderer({ gl, width: W, height: H }), m = packed({ cx: 0.5 }), truth = personMask(W, H, { aspect: A, cx: 0.5 });
+  r.setMask(m); r.draw(open, { aspect: A, timeS: 3 }); const px = read();
+  let inside = 0, wrongIn = 0, outside = 0, wrongOut = 0;
+  for (let y = Math.round(0.08 * H); y < Math.round(0.92 * H); y += 2) for (let x = Math.round(0.08 * W); x < Math.round(0.92 * W); x += 2) {   // well inside the window (its edge glow is not part of this test)
+    const t = truth[y * W + x], a = alphaAt(px, x, y);
+    if (t > 0.98) { inside++; if (a > 40) wrongIn++; }            // person: camera shows through (alpha ~0)
+    else if (t < 0.02) { outside++; if (a < 215) wrongOut++; }    // background: window covers (alpha ~255)
+  }
+  console.log(`# cut-out: ${inside} person samples (${wrongIn} covered by mistake), ${outside} background samples (${wrongOut} left uncovered)`);
+  assert.ok(inside > 3000 && outside > 3000);
+  assert.ok(wrongIn / inside < 0.05, `${wrongIn}/${inside} person pixels covered`);
+  assert.ok(wrongOut / outside < 0.02, `${wrongOut}/${outside} background pixels uncovered`);
+});
+
+test('cut-out orientation: a person on the LEFT of the picture is cut out on the left, high things stay high', { skip }, () => {
+  const r = createWindowRenderer({ gl, width: W, height: H });
+  r.setMask(packed({ cx: 0.25 })); r.draw(open, { aspect: A, timeS: 3 }); const px = read();
+  const hx = Math.round(0.25 * W), hy = Math.round(0.40 * H);               // head centre of the synthetic person
+  assert.ok(alphaAt(px, hx, hy) < 40, 'head is cut out where it was drawn');
+  assert.ok(alphaAt(px, Math.round(0.75 * W), hy) > 215, 'mirror image position is covered (no left/right flip)');
+  assert.ok(alphaAt(px, hx, Math.round(0.08 * H)) > 215, 'above the head is covered (no up/down flip)');
+  assert.ok(alphaAt(px, hx, Math.round(0.85 * H)) < 40, 'shoulders at the bottom are cut out');
+});
+
+test('no mask, a cleared mask, or a stale one: the whole window is covered; the old S3 geometry modes ignore the mask', { skip }, () => {
+  const r = createWindowRenderer({ gl, width: W, height: H });
+  r.draw(open, { aspect: A, timeS: 3 }); assert.ok(alphaAt(read(), W / 2, H / 2) > 250);
+  r.setMask(packed()); r.setMask(null); r.draw(open, { aspect: A, timeS: 3 }); assert.ok(alphaAt(read(), Math.round(0.5 * W), Math.round(0.4 * H)) > 250, 'cleared mask no longer cuts');
+  r.setMask(packed()); r.draw(open, { aspect: A, mode: 'mask' }); assert.ok(alphaAt(read(), Math.round(0.5 * W), Math.round(0.4 * H)) > 250, 'mask mode is pure geometry');
+  assert.throws(() => r.setMask({ w: 4, h: 4, data: new Uint8Array(10) }), /does not match/);
+});
+
+test('mask outside the window does nothing (no leaks outside the frame)', { skip }, () => {
+  const r = createWindowRenderer({ gl, width: W, height: H }), q = rect(0.7, 0.5, 0.3, 0.5, 0, A), Q = [q.tl, q.tr, q.br, q.bl];
+  r.setMask(packed({ cx: 0.2 })); r.draw({ visible: true, corners: Q, hu: .5, hv: .5, flash: 0 }, { aspect: A, timeS: 3 }); const px = read();
+  let leak = 0; for (let y = 0; y < H; y += 2) for (let x = 0; x < W * 0.4; x += 2) leak += px[((H - 1 - y) * W + x) * 4 + 3];   // far left, outside the window and its glow
+  assert.equal(leak, 0);
+});
+
+test('person edge: soft transition (a few pixels), rim light only on the edge and only inside the window', { skip }, () => {
+  const r = createWindowRenderer({ gl, width: W, height: H }), m = packed({ cx: 0.5 });
+  r.setMask(m); r.draw(open, { aspect: A, timeS: 3 }); const px = read(), y = Math.round(0.40 * H);
+  // walk right from the head centre across the edge along one row: alpha goes 0 -> ~255
+  const row = []; for (let x = Math.round(0.5 * W); x < W - 40; x++) row.push(alphaAt(px, x, y));
+  const i0 = row.findIndex(a => a > 30), i1 = row.findIndex(a => a > 225);
+  console.log(`# head edge transition: ${i1 - i0} px wide (alpha 30 -> 225)`);
+  assert.ok(i0 > 0 && i1 > i0 && i1 - i0 <= 8, 'edge is soft but not blurry');
+  // rim: pixels in the transition carry light, pixels deep inside the person do not
+  const lit = rgbAt(px, Math.round(0.5 * W) + i0 + 1, y), deep = rgbAt(px, Math.round(0.5 * W), y);
+  assert.ok(Math.max(...lit) > 20 && Math.max(...deep) === 0, `rim ${lit} deep ${deep}`);
+  // with the window closed (not visible) nothing at all is drawn
+  assert.equal(r.draw({ visible: false }, {}), false);
+});
+
+test('neon background: lively but valid (no NaN/black holes), moves in normal mode, is perfectly still in reduced mode', { skip }, () => {
+  const r = createWindowRenderer({ gl, width: W, height: H });
+  const shot = (timeS, reduced) => { r.draw(open, { aspect: A, timeS, reduced }); return read(); };
+  const a = shot(5, false), b = shot(6.3, false), c = shot(5, true), d = shot(40, true);
+  // interior only (the window's edge glow has its own comet animation and a faint halo that reaches a little way inside)
+  const interior = (u, v, m = 0.12) => { let sum = 0, max = 0; for (let y = Math.round(m * H); y < Math.round((1 - m) * H); y++) for (let x = Math.round(m * W); x < Math.round((1 - m) * W); x++) { const i = ((H - 1 - y) * W + x) * 4; for (let k = 0; k < 3; k++) { const df = Math.abs(u[i + k] - v[i + k]); sum += df; max = Math.max(max, df); } } return { sum, max }; };
+  const colours = new Set(); let dark = 0, n = 0;
+  for (let y = 40; y < H - 40; y += 3) for (let x = 40; x < W - 40; x += 3) { const [R, G, B] = rgbAt(a, x, y); colours.add((R >> 4) << 8 | (G >> 4) << 4 | (B >> 4)); if (R + G + B < 12) dark++; n++; }
+  assert.ok(colours.size > 60, `only ${colours.size} colours`);
+  assert.ok(dark / n < 0.3, `${(100 * dark / n).toFixed(0)}% pure black`);
+  assert.ok(interior(a, b).sum > 2000, 'normal mode animates');
+  assert.ok(interior(c, d).max <= 2, `reduced mode: the picture inside the window is still (max change ${interior(c, d).max} levels, only the edge-glow halo)`);
+  assert.equal(interior(c, d, 0.3).max, 0, 'deep inside the window nothing changes at all');
+});
+
+test('neon background: windows flip at most ~3 times per second and never as a big flash (reduced-flash rules)', { skip }, () => {
+  const r = createWindowRenderer({ gl, width: W, height: H });
+  const lum = t => { r.draw(open, { aspect: A, timeS: t, reduced: false }); const px = read(); let s = 0, n = 0; for (let i = 0; i < px.length; i += 16) { s += px[i] + px[i + 1] + px[i + 2]; n++; } return s / n; };
+  const series = []; for (let t = 10; t < 14; t += 1 / 30) series.push(lum(t));
+  let maxJump = 0; for (let i = 1; i < series.length; i++) maxJump = Math.max(maxJump, Math.abs(series[i] - series[i - 1]) / Math.max(series[i - 1], 1));
+  console.log(`# neon: largest frame-to-frame change in average brightness ${(maxJump * 100).toFixed(1)}%`);
+  assert.ok(maxJump < 0.08, 'no flashes: the average brightness never jumps');
+});
+
+test('background keeps its proportions: a circle stays round in wide, tall and tilted windows (uv and window aspect are wired right)', { skip }, () => {
+  const r = createWindowRenderer({ gl, width: W, height: H });
+  const size = (cw, ch, deg) => {
+    const q = rect(0.5, 0.5, cw, ch, deg, A), Q = [q.tl, q.tr, q.br, q.bl];
+    r.draw({ visible: true, corners: Q, hu: .5, hv: .5, flash: 0 }, { aspect: A, timeS: 3, reduced: true, mode: 'circle' }); const px = read();
+    let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1;
+    const gx0 = Math.round((0.5 - cw / 2) * W) + 14, gx1 = Math.round((0.5 + cw / 2) * W) - 14, gy0 = Math.round((0.5 - ch / 2) * H) + 14, gy1 = Math.round((0.5 + ch / 2) * H) - 14; // inside the window only: its edge glow is not the test pattern
+    for (let y = gy0; y < gy1; y++) for (let x = gx0; x < gx1; x++) { const [R, G, B] = rgbAt(px, x, y); if (R > 200 && G > 200 && B > 200) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); } }
+    return { w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  };
+  for (const [cw, ch] of [[0.8, 0.8], [0.9, 0.55], [0.4, 0.9]]) {
+    const s = size(cw, ch, 0), ratio = s.w / s.h; console.log(`# circle in a ${cw}x${ch} window: ${s.w}x${s.h} px (ratio ${ratio.toFixed(3)})`);
+    assert.ok(Math.abs(ratio - 1) < 0.04, `circle ratio ${ratio.toFixed(3)}`);
+  }
+  // the circle has radius 0.3 WINDOW heights, so its diameter is 0.6 of the window's height in pixels
+  for (const [cw, ch] of [[0.8, 0.8], [0.9, 0.55], [0.4, 0.9]]) { const s = size(cw, ch, 0); assert.ok(Math.abs(s.h - 0.6 * ch * H) <= 4, `diameter ${s.h} vs ${(0.6 * ch * H).toFixed(0)}`); }
+});
+
+test('S4 frame time: neon + cut-out at 960x540 (software GL = upper bound), and previews', { skip }, () => {
+  const w = 960, h = 540, big = createGL(w, h, { preserveDrawingBuffer: true, premultipliedAlpha: true });
+  const r = createWindowRenderer({ gl: big, width: w, height: h }), sm = createMaskSmoother();
+  r.setMask(sm.update({ person: personMask(384, 216, { aspect: A }) }, 384, 216, 0));
+  const ms = []; for (let k = 0; k < 60; k++) { const t0 = performance.now(); r.draw(open, { aspect: A, timeS: k / 30 }); big.finish(); ms.push(performance.now() - t0); }
+  ms.sort((a, b) => a - b); console.log(`# neon + cut-out at 960x540, software-rendered: median ${ms[30].toFixed(1)} ms, p95 ${ms[57].toFixed(1)} ms`);
+  assert.ok(ms[57] < 400);
+  const one = personMask(384, 216, { aspect: A }), up = []; for (let k = 0; k < 60; k++) { const m = sm.update({ person: one }, 384, 216, 1000 + k * 33), t0 = performance.now(); r.setMask(m); up.push(performance.now() - t0); }
+  up.sort((a, b) => a - b); console.log(`# mask upload 384x216 RGBA: median ${up[30].toFixed(2)} ms`);
+  assert.ok(up[57] < 20);
+});
