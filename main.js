@@ -13,6 +13,8 @@ import { drawFaceOverlay } from './faceoverlay.js';
 import { maskFresh } from './segmask.js';
 import { createSuitFx } from './suitgl.js';
 import { SUIT, OUTFIT } from './config.js';
+import { createMaskGesture } from './mask.js';
+import { drawMaskOverlay } from './maskoverlay.js';
 
 const $ = id => document.getElementById(id);
 const dbg = createDebug();
@@ -27,7 +29,11 @@ const suitWanted = () => !suitOff && (look === 'suit' || look === 'jacket') && s
 // Nothing is worn until the hand frame has locked and the window is open (like the reference video); then the outfit glitches in. Reset button / mirror toggle / camera restart take it off again.
 let outfitStart = null;
 const outfitWanted = () => suitWanted() && outfitStart !== null;
-function takeOff() { outfitStart = null; suit.setReveal(0); suit.setMask(null); }
+function takeOff() { outfitStart = null; suit.setReveal(0); suit.setMask(null); mask.reset(); maskSnap = null; }
+// ---- mask system, part A (S8): the fist-from-above-the-head-to-the-chin gesture and the mask state. Controlled ONLY by the hands + face; it watches only while the outfit is fully worn. S9 draws the mask from maskSnap.
+const mask = createMaskGesture();
+let maskSnap = null;
+const outfitReady = () => outfitWanted() && performance.now() - outfitStart >= OUTFIT.revealMs;   // the outfit has finished glitching in
 const fx = createWindowFx({ canvas: $('fx'), mode: qs.get('fx') || 'normal', reducedFlash: qs.has('calm') ? true : undefined });
 
 const MESSAGES = {
@@ -45,14 +51,22 @@ const HINTS = {
   arming: 'Hold it steady…',
   active: 'Frame locked.',
   lost: 'Hold on, finding your hands…',
+  maskidle: 'Make a fist above your head, hold it a moment, then pull it slowly down your face to your chin.',
+  maskarmed: 'Now pull the fist slowly down through your face…',
+  maskpull: 'Keep going down to your chin…',
+  maskworn: 'Mask on.',
 };
 const setHint = key => { const el = $('hint'); if (el.dataset.k !== key) { el.dataset.k = key; el.textContent = HINTS[key] || ''; } };
+const maskHintKey = () => (!outfitReady() || !maskSnap ? null : maskSnap.state === 'worn' ? 'maskworn' : maskSnap.phase === 'armed' && maskSnap.reason === 'armed' ? 'maskarmed' : maskSnap.phase === 'pulling' || maskSnap.phase === 'completing' ? 'maskpull' : 'maskidle');
+const maskHintOn = () => /^mask/.test($('hint').dataset.k || '');
 
 // ---- person segmentation (S4): runs only while the window is (about to be) open. ?seg=off disables it, ?segdelegate=cpu|gpu forces a delegate, ?segtest=off skips the self-test.
 const segOff = qs.get('seg') === 'off';
 // ---- face (S5): runs only with ?face=on (S8/S9 switch FACE.enabled on). ?face=off always disables. The hair channel is read from the segmenter only when the face seam needs it.
 const faceOn = qs.get('face') === 'off' ? false : qs.get('face') === 'on' || FACE.enabled;
-const seg = createSegmenter({ onStatus: (s, n) => dbg.set('seg', `${s}${n ? ' · ' + n : ''}`), config: faceOn ? { ...SEG, layers: [...new Set([...SEG.layers, 'hair'])] } : SEG });
+const faceForced = qs.get('face') === 'on';                                   // ?face=on keeps the face model running all the time (debugging)
+const seamNeeded = faceOn && (dbg.on || faceForced);                           // the hair channel is only read for the seam (debug view now, the S9 mask later)
+const seg = createSegmenter({ onStatus: (s, n) => dbg.set('seg', `${s}${n ? ' · ' + n : ''}`), config: seamNeeded ? { ...SEG, layers: [...new Set([...SEG.layers, 'hair'])] } : SEG });
 let lastMask = null, lastMaskT = 0;
 let segLoading = false, segActive = false, segIdleSince = null;
 async function loadSeg() { if (segOff || segLoading) return; segLoading = true; await seg.load(); }
@@ -75,8 +89,13 @@ const faceDet = createFaceDetector({ onStatus: (s, n) => dbg.set('face model', `
 const faceTrack = createFaceTracker();
 let face = { present: false, conf: 0 }, seam = null, faceLoading = false, lastFaceVT = -1;
 async function loadFace() { if (!faceOn || faceLoading) return; faceLoading = true; await faceDet.load(); }
+// The face model costs real time: it runs only while the mask gesture needs it (outfit worn, mask not on yet), or for debugging (?debug=1, ?face=on).
+let faceActive = false;
+const faceWanted = () => faceOn && (faceForced || dbg.on || (outfitWanted() && !!(maskSnap ? maskSnap.state !== 'worn' : true)));
 function runFace(video, canvas) {
   if (!faceOn) return;
+  if (!faceWanted()) { if (faceActive) { faceActive = false; faceDet.pause(); faceTrack.reset(); face = { present: false, conf: 0 }; seam = null; lastFaceVT = -1; } return; }
+  faceActive = true;
   const now = performance.now(), aspect = canvas.width / canvas.height;
   let raw;                                                  // undefined = no new detection this frame (model not ready, cadence skip, same video frame)
   if (faceDet.status === 'ready' && video.currentTime !== lastFaceVT) { lastFaceVT = video.currentTime; raw = faceDet.detect(video); }
@@ -91,7 +110,7 @@ function runFace(video, canvas) {
 
 // ---- hands + gesture ----
 const tracker = createHandTracker();
-const gesture = createFrameGesture(undefined, (s, prev) => { dbg.set('gesture', `${prev} → ${s}`); setHint(s); });
+const gesture = createFrameGesture(undefined, (s, prev) => { dbg.set('gesture', `${prev} → ${s}`); if (!maskHintOn()) setHint(s); });
 let handsMs = 0;   // rolling average of one hand detection, shown in the FPS counter
 let detector = null, loading = false, lastVT = -1, lastTs = 0, errors = 0;
 let hands = [], snap = { state: 'idle', reason: '-', area: 0, corners: null, candidate: null, progress: 0 };
@@ -147,7 +166,11 @@ const cam = createCamera({
     suit.setFrame(canvas);
     runSeg(canvas, hands);
     runFace(video, canvas);
-    if (dbg.on) { const g = canvas.getContext('2d'); drawOverlay(g, canvas.width, canvas.height, hands, snap); if (faceOn) drawFaceOverlay(g, canvas.width, canvas.height, face, seam); }
+    const nowT = performance.now();
+    maskSnap = mask.update({ hands, face, t: nowT, aspect: canvas.width / canvas.height, enabled: outfitReady() });
+    const mh = maskHintKey(); if (mh) setHint(mh); else if (maskHintOn()) setHint(gesture.state);
+    if (dbg.on) { const g = canvas.getContext('2d'); drawOverlay(g, canvas.width, canvas.height, hands, snap); if (faceOn) drawFaceOverlay(g, canvas.width, canvas.height, face, seam); if (outfitReady()) drawMaskOverlay(g, canvas.width, canvas.height, face, maskSnap); }
+    if (dbg.on && maskSnap) dbg.set('mask', `${maskSnap.state} ${Math.round(maskSnap.progress * 100)}% · ${maskSnap.phase} (${maskSnap.reason}) · closed hands ${maskSnap.debug.fists} · pulls cancelled ${maskSnap.stats.cancels}${maskSnap.stats.cancels ? ' (last: ' + maskSnap.stats.lastCancel + ')' : ''} · done ${maskSnap.stats.completions}${maskSnap.debug.pos ? ` · fist head t ${maskSnap.debug.pos.t.toFixed(2)} s ${maskSnap.debug.pos.s.toFixed(2)}` : ''}`);
     if (dbg.on) dbg.set('suit', `${suit.ok ? (outfitWanted() ? 'worn' : suitWanted() ? 'waiting for the frame' : 'off') : 'WebGL unavailable'} · ${suit.stats.fps} fps · ${suit.stats.ms.toFixed(2)} ms/draw · ${suit.stats.body} · fabric ${suit.stats.tex}`);
     dbg.set('draw+detect ms', (ms + performance.now() - t0).toFixed(1));
     dbg.set('window', fx.stats.ok ? `${fx.stats.phase} · ${fx.stats.fps} fps · ${fx.stats.ms.toFixed(2)} ms/draw${fx.reducedFlash ? ' · calm' : ''}` : 'WebGL unavailable'); dbg.tick();

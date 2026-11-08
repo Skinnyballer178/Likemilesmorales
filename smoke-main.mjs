@@ -52,10 +52,16 @@ if (faceOn) {
   check('debug: seam line with mask and hair', has(/seam: coverage [1-9][\d.]*% .* mask yes · hair yes/), (text.match(/seam: .*/) || [''])[0]);
   check('debug: seam hair cut and person clip are live numbers', has(/hair cut (?!0\.00%)/), '');
   }
+} else if (/face=off/.test(search)) {
+  check('?face=off: face model NOT created and never called', counts.faceCreated.length === 0 && counts.faceCalls === 0);
+  check('?face=off: no face lines in the debug panel', !has(/face/));
 } else {
-  check('face model NOT created and never called', counts.faceCreated.length === 0 && counts.faceCalls === 0);
-  check('no face lines in the debug panel', !has(/face/));
+  // S8: the face model is part of the boot (FACE.enabled) but only RUNS while the mask gesture needs it (outfit worn) or when debugging
+  check('face model created at boot (FACE.enabled)', counts.faceCreated.length === 1);
+  if (dbgOn) check('?debug=1: face model runs for the debug view', counts.faceCalls > 10, `${counts.faceCalls} calls`);
+  else check('face model idle until an outfit is worn (no WebGL here, so only the 2 warm-up calls)', counts.faceCalls <= 2, `${counts.faceCalls} calls`);
 }
+if (dbgOn) check('debug: mask line shows the idle mask state', has(/mask: hidden 0% · idle \(/), (text.match(/mask: .*/) || [''])[0]);
 check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 console.log('\n' + text.split('\n').join('\n  '));
 process.exit(checks.every(Boolean) ? 0 : 1);

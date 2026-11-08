@@ -8,7 +8,7 @@
     "textures": "python3 tools/make_textures.py suit.jpg jacket.jpg",
     "preview": "xvfb-run -a node render-preview.mjs preview",
     "preview:s4": "xvfb-run -a node prev_s4.mjs preview-s4",
-    "test:smoke": "node smoke-main.mjs '?face=on&debug=1' && node smoke-main.mjs '?debug=1' && node smoke-main.mjs '?face=on'",
+    "test:smoke": "node smoke-main.mjs '?face=on&debug=1' && node smoke-main.mjs '?debug=1' && node smoke-main.mjs '?face=on' && node smoke-main.mjs '?face=off' && node smoke-main.mjs ''",
     "preview:s5": "node prev_s5.mjs preview-s5"
   },
   "optionalDependencies": {

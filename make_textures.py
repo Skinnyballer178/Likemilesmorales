@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds assets/suit.webp and assets/jacket.webp from the two Grok front-view renders (Session 7, texture version).
+"""Builds suit.webp and jacket.webp from the two Grok front-view renders (Session 7, texture version).
 Steps per image: crop the front figure, cut the figure out of the grey studio background (GrabCut), push the figure's own colours a few pixels outward over the
 background, then fade to a smooth fabric average (so sampling outside the figure never shows grey or streaks), flatten the baked studio lighting a bit (the live camera supplies the light), upscale 2x.
 Usage: python3 tools/make_textures.py suit.jpg jacket.jpg   (needs opencv-python, numpy, scipy, pillow). The crop rectangles must match TEX in config.js."""
@@ -59,7 +59,7 @@ def build(src, name, job):
     out = (ext.astype(np.float32) * wgt + smooth * (1 - wgt)).clip(0, 255).astype(np.uint8)
     out = cv2.resize(out, (w * UP, h * UP), interpolation=cv2.INTER_LANCZOS4)
     blur2 = cv2.GaussianBlur(out, (0, 0), 1.2); out = cv2.addWeighted(out, 1.5, blur2, -0.5, 0)       # light unsharp after the upscale
-    Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB)).save(f'assets/{name}.webp', quality=88, method=6)
+    Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB)).save(f'{name}.webp', quality=88, method=6)
     cv2.imwrite(f'/tmp/{name}_fg.png', fg * 255)
     print(name, out.shape[1], 'x', out.shape[0], 'fg share', round(float(fg.mean()), 2))
 

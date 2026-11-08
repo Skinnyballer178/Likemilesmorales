@@ -87,7 +87,7 @@ export const NEON = {
 // coordinates (x flipped when mirrored) and smoothed. S8 (mask gesture) and S9 (mask render) read the result.
 // The face model costs real time, so it only runs when asked for: ?face=on (S8/S9 will flip FACE.enabled to true). ?face=off always disables.
 export const FACE = {
-  enabled: false,
+  enabled: true,   // S8: the mask gesture reads the face (head-relative fist path). The model only runs while an outfit is worn (see main.js faceWanted), so it costs nothing before that.
   options: { numFaces: 1, minFaceDetectionConfidence: 0.5, minFacePresenceConfidence: 0.5, minTrackingConfidence: 0.5, outputFaceBlendshapes: false, outputFacialTransformationMatrixes: true },
   filter: { minCutoff: 1.5, beta: 12, dCutoff: 1.0 }, // One Euro on every landmark x/y (display units). Raise minCutoff = steadier but laggier
   minHeight: 0.07, maxHeight: 1.6,   // plausible face height (landmark 10 to chin) in picture-height units; outside = ignored as a false detection
@@ -118,7 +118,7 @@ export const SEAM = {
 };
 
 // ---- Sessions 6-7: Suit and Jacket looks (body) ----
-// A WebGL layer (#suit) between the camera picture and the window layer. It lays the REAL Grok fabric (assets/suit.webp, assets/jacket.webp, made by tools/make_textures.py)
+// A WebGL layer (#suit) between the camera picture and the window layer. It lays the REAL Grok fabric (suit.webp, jacket.webp, made by make_textures.py)
 // over the person's clothes and skin below the head, hands included. The face and hair are left alone (the mask is S8/S9). Nothing is drawn by code.
 // The textures are front views of a standing figure; each body pixel looks up the texture like this: the shoulder line of the user (measured from the mask) is pinned to the
 // figure's shoulder line and the user's chest width to the figure's width (set a bit NARROWER than the figure so the user's outline never runs off the picture's edge); sleeves follow the user's arms (towards the wrist when a hand is raised); the hood is stretched
@@ -137,10 +137,10 @@ export const SUIT = {
   jacket: { bulk: 0.04, shoulderX: 0.42, shoulderDrop: 0.08 },               // jacket: silhouette grows this far past the body (chest-width units); sleeve start of the arm axis
 };
 export const TEX = {
-  suit: { url: 'assets/suit.webp', crop: [170, 70, 270, 600],
+  suit: { url: 'suit.webp', crop: [170, 70, 270, 600],
     cx: 300.5, shoulderY: 198, cw: 158,                                     // figure centre line, shoulder line, and the width that matches the user's chest width
     armL: { s: [225.5, 212], d: [-0.173, 0.985] }, armR: { s: [375.5, 212], d: [0.166, 0.986] } },   // shoulder point and arm direction in the figure
-  jacket: { url: 'assets/jacket.webp', crop: [235, 90, 375, 860],
+  jacket: { url: 'jacket.webp', crop: [235, 90, 375, 860],
     cx: 420, shoulderY: 252, cw: 296,
     armL: { s: [284, 278], d: [0.066, 0.998] }, armR: { s: [556, 278], d: [-0.045, 0.999] },
     hood: { c: [420, 195], r: [36, 55] } },                                  // face opening of the hood in the figure: centre and half-size
@@ -149,3 +149,40 @@ export const TEX = {
 
 // ---- Outfit reveal (S7 fix): nothing is worn until the hand frame has locked and the window is open; then the outfit glitches in, slice by slice, like the reference video ----
 export const OUTFIT = { revealMs: 900, slices: 36, neon: [0.25, 0.9, 1.0] };
+
+// ---- Session 8: mask gesture (system A, mask.js) ----
+// ONE closed fist starts ABOVE the top of the head, then travels steadily DOWN through the face to the chin. Everything is measured in HEAD coordinates (facelm.js toHead):
+// t = 0 at the chin, 1 at landmark 10 (forehead), headTop = 1 + FACE.headTopAllow; s = sideways distance from the head axis. Both are in face-height units, so where the head is,
+// how it is tilted and how far it is from the camera do not matter. The mask stays on once it is on ("worn"); only Reset / mirror toggle / camera restart take it off.
+export const MASK_GESTURE = {
+  fist: {
+    enterRatio: 1.25,   // a finger is CURLED when (fingertip to wrist) / (knuckle to wrist) is below this (open finger is about 1.8, tight fist about 0.7-1.0)
+    exitRatio: 1.45,    // looser limit to STAY closed (hysteresis, so a fist does not flicker)
+    enterFingers: 4,    // all four fingers curled to start counting as a fist ...
+    keepFingers: 3,     // ... three are enough to keep it
+    minScore: 0.5,      // hand detection confidence
+    minPalm: 0.025, maxPalm: 0.6,   // plausible palm size (wrist to middle knuckle) in picture heights; outside = ignored
+  },
+  startBelowTop: 0.10,  // the start zone begins this far BELOW the head top (face heights); it has no upper limit (the hand may be far above the head)
+  startS: 0.9,          // the start zone is this wide each side of the head axis
+  corridorS: 1.0,       // while pulling the fist must stay within this distance of the head axis (a hand swiping across the face leaves it)
+  endT: 0.10,           // the pull is complete when the fist reaches this height (just above the chin)
+  minTravel: 0.7,       // the zone start to endT must be at least this long (face heights); protects against a tiny head frame / bad face
+  armMs: 150,           // the fist must rest in the start zone this long before a pull counts (a passing hand never arms)
+  leaveT: 0.0,          // the pull starts when the fist drops below the start zone's lower edge minus this
+  backtrack: 0.2,       // the fist moving UP by more than this from its lowest point so far cancels (swipe up, shaking)
+  minPullMs: 220,       // faster than this is a flick, not a pull
+  maxPullMs: 3500,      // slower than this = gave up
+  stallMs: 1200,        // no new progress (0.03 face heights) for this long cancels
+  stallStep: 0.03,
+  openGraceMs: 120,     // the hand may open / lose fist shape this long (tracking blips); longer = cancel
+  dropGraceMs: 180,     // the hand may vanish this long
+  faceGraceMs: 300,     // the face may be missing this long during a pull (the tracker itself holds 250 ms)
+  minFaceConf: 0.6,     // the face must be this sure to start a pull
+  topEdgeY: 0.04,       // head top above this picture edge (cropped): the start zone becomes the top strip of the picture instead
+  topStripY: 0.14,      // ... the fist must be above this picture height (0 = top edge)
+  followTauMs: 45,      // progress follows the fist with this smoothing (only ever forwards while pulling)
+  completeMs: 320,      // after the pull is complete the reveal finishes with an ease of about this length
+  cancelMs: 350,        // a cancelled pull un-reveals over this long
+  maxDtMs: 100,
+};
