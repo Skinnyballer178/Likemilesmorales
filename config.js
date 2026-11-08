@@ -117,37 +117,34 @@ export const SEAM = {
   person: [0.30, 0.70],                       // the mask never leaves the person silhouette: soft threshold on the person value (same as SEG.edge)
 };
 
-// ---- Session 6: Suit look (body) ----
-// A WebGL layer (#suit) between the camera picture and the window layer. It paints the person's clothes and skin (below the
-// head, plus the hands) with a black suit: fine red web, a ringed spider emblem on the chest and red wrist bands. The face and
-// hair are left alone (S9 puts the mask there). The suit is drawn slightly see-through so the real folds and light show through.
-// All sizes below are fractions of the measured body, so the suit follows the person from any distance.
+// ---- Sessions 6-7: Suit and Jacket looks (body) ----
+// A WebGL layer (#suit) between the camera picture and the window layer. It lays the REAL Grok fabric (assets/suit.webp, assets/jacket.webp, made by tools/make_textures.py)
+// over the person's clothes and skin below the head, hands included. The face and hair are left alone (the mask is S8/S9). Nothing is drawn by code.
+// The textures are front views of a standing figure; each body pixel looks up the texture like this: the shoulder line of the user (measured from the mask) is pinned to the
+// figure's shoulder line and the user's chest width to the figure's width (set a bit NARROWER than the figure so the user's outline never runs off the picture's edge); sleeves follow the user's arms (towards the wrist when a hand is raised); the hood is stretched
+// from the head. All measurements below are in pixels of the ORIGINAL Grok picture (see crop).
 export const SUIT = {
   enabled: true,
   tauMs: 120, resetGapMs: 600,            // smoothing of the measured body numbers (head, chest). Lower = livelier, higher = steadier
-  alpha: 0.95,                            // suit opacity on the body (the live camera shading is multiplied in, so the real folds and light still show)
-  alphaRed: 0.97,
-  shadeK: 1.1, grain: 0.035, lumW: 160, lumH: 90, // live-video shading: strength, film grain, size of the small luminance picture the shader reads (about 1/8 of the camera picture)                         // opacity of the red parts
+  alpha: 0.96, alphaJacket: 0.98,         // fabric opacity on the body (the live camera shading is multiplied in, so the real folds and light still show)
+  shadeK: 1.1, grain: 0.035, lumW: 160, lumH: 90, // live-video shading: strength, film grain, size of the small luminance picture the shader reads (about 1/8 of the camera picture)
   personMin: 0.02,                        // a row counts as "person" when this share of its width is person (ignores specks)
   torso: { minRowFrac: 0.4, rows: 3, startFrac: 0.10, fallbackFrac: 0.30 },  // torso top = first run of rows with >= 40% of the widest clothes row, no sooner than 10% down the person
-  head: { heightFrac: 0.8, rxScale: 0.7, ryScale: 1.2, maxRxToSpan: 0.48 },  // maxRxToSpan: head half-width never exceeds this x (person top -> torso top), so an arm touching the head cannot blow the hood up. Head ellipse: heightFrac = share of (person top -> torso top) that is head, rxScale = width factor on the median head width
+  head: { heightFrac: 0.8, rxScale: 0.7, ryScale: 1.2, maxRxToSpan: 0.48 },  // head ellipse: heightFrac = share of (person top -> torso top) that is head, rxScale = width factor on the median head width; maxRxToSpan caps the half-width so an arm touching the head cannot blow the hood up
   chestDrop: 0.2,                         // chest centre = torso top + this share of the body height below it
-  web: { spokes: 18, line: 0.0032, rings: 9, sag: 0.12 },   // fine, like the Grok suit: thin web lines, not a fat red net                     // web geometry in chest-width units
-  emblemR: 0.2,                          // emblem ring radius, in chest-width units
-  band: { along: 0.45, half: 0.22, across: 0.62 },                           // wrist band: distance from the wrist, half length, half width (all x hand size, wrist to middle knuckle)
+  band: { along: 0.45, half: 0.22, across: 0.62 },                           // wrist band point used for arm direction: distance from the wrist, x hand size (wrist to middle knuckle)
   hand: { centre: 1.1, radius: 1.35 },                                       // hand region that is always suited, even above the neck line
-  red: [0.50, 0.10, 0.11], emblemRed: [0.78, 0.10, 0.12], base: [0.065, 0.065, 0.075],   // sampled from the Grok suit image: near-black fabric, dim red web, stronger red emblem and bands
-  // Session 7: Jacket look = blue quilted puffer over the clothes/arms, red hood up, red inner hoodie at the neck. The suit stays only on the hands (in front of the sleeves).
-  jacket: {
-    bulk: 0.06,                 // puffer bulk: the silhouette grows this far past the body, in chest-width units
-    baffle: 0.3,                // (Grok jacket: about 4 wide baffles down the body)
-    open: 0.2,                  // front is unzipped: jacket edges sit this far either side of the centre; suit + emblem inside, red hoodie strips next to it
-    // quilting row spacing, chest-width units (rows run across the torso, and across each sleeve along the arm)
-    alpha: 0.97,                // jacket opacity (nearly hides the real clothes; the puffer is thick)
-    shoulderX: 0.42, shoulderDrop: 0.08, // sleeve start: sideways from the chest centre and down from the torso top, chest-width units
-    blue: [0.12, 0.33, 0.45], blueDark: [0.04, 0.13, 0.20],
-    hoodRed: [0.52, 0.14, 0.14], hoodie: [0.40, 0.07, 0.08],
-  },
+  jacket: { bulk: 0.04, shoulderX: 0.42, shoulderDrop: 0.08 },               // jacket: silhouette grows this far past the body (chest-width units); sleeve start of the arm axis
+};
+export const TEX = {
+  suit: { url: 'assets/suit.webp', crop: [170, 70, 270, 600],
+    cx: 300.5, shoulderY: 198, cw: 158,                                     // figure centre line, shoulder line, and the width that matches the user's chest width
+    armL: { s: [225.5, 212], d: [-0.173, 0.985] }, armR: { s: [375.5, 212], d: [0.166, 0.986] } },   // shoulder point and arm direction in the figure
+  jacket: { url: 'assets/jacket.webp', crop: [235, 90, 375, 860],
+    cx: 420, shoulderY: 252, cw: 296,
+    armL: { s: [284, 278], d: [0.066, 0.998] }, armR: { s: [556, 278], d: [-0.045, 0.999] },
+    hood: { c: [420, 195], r: [36, 55] } },                                  // face opening of the hood in the figure: centre and half-size
+  glove: [300, 285],                                                         // a patch of plain suit fabric (suit texture, belly) used for the hands in both looks
 };
 
 // ---- Outfit reveal (S7 fix): nothing is worn until the hand frame has locked and the window is open; then the outfit glitches in, slice by slice, like the reference video ----

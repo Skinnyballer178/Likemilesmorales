@@ -148,7 +148,7 @@ const cam = createCamera({
     runSeg(canvas, hands);
     runFace(video, canvas);
     if (dbg.on) { const g = canvas.getContext('2d'); drawOverlay(g, canvas.width, canvas.height, hands, snap); if (faceOn) drawFaceOverlay(g, canvas.width, canvas.height, face, seam); }
-    if (dbg.on) dbg.set('suit', `${suit.ok ? (outfitWanted() ? 'worn' : suitWanted() ? 'waiting for the frame' : 'off') : 'WebGL unavailable'} · ${suit.stats.fps} fps · ${suit.stats.ms.toFixed(2)} ms/draw · ${suit.stats.body}`);
+    if (dbg.on) dbg.set('suit', `${suit.ok ? (outfitWanted() ? 'worn' : suitWanted() ? 'waiting for the frame' : 'off') : 'WebGL unavailable'} · ${suit.stats.fps} fps · ${suit.stats.ms.toFixed(2)} ms/draw · ${suit.stats.body} · fabric ${suit.stats.tex}`);
     dbg.set('draw+detect ms', (ms + performance.now() - t0).toFixed(1));
     dbg.set('window', fx.stats.ok ? `${fx.stats.phase} · ${fx.stats.fps} fps · ${fx.stats.ms.toFixed(2)} ms/draw${fx.reducedFlash ? ' · calm' : ''}` : 'WebGL unavailable'); dbg.tick();
   },
