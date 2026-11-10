@@ -1,23 +1,17 @@
 {
-  "name": "session-9-suit-on-the-wall",
+  "name": "suit-up",
   "private": true,
-  "version": "0.9.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 5173",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview --host 127.0.0.1 --port 5173",
-    "test": "node --experimental-strip-types --test src/lib/shell.test.ts src/lib/fit.test.ts"
+    "test": "node --test",
+    "test:gl": "xvfb-run -a node --test windowgl.test.mjs suitgl.test.mjs",
+    "textures": "python3 tools/make_textures.py suit.jpg jacket.jpg",
+    "preview": "xvfb-run -a node render-preview.mjs preview",
+    "preview:s4": "xvfb-run -a node prev_s4.mjs preview-s4",
+    "test:smoke": "node smoke-main.mjs '?face=on&debug=1' && node smoke-main.mjs '?debug=1' && node smoke-main.mjs '?face=on' && node smoke-main.mjs '?face=off' && node smoke-main.mjs ''",
+    "preview:s5": "node prev_s5.mjs preview-s5"
   },
-  "dependencies": {
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  },
-  "devDependencies": {
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.3"
+  "optionalDependencies": {
+    "gl": "^8.1.6"
   }
 }
